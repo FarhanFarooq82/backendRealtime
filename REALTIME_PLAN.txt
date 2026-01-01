@@ -1,0 +1,29 @@
+REALTIME MIGRATION PLAN
+=======================
+
+Phase 1: Project Initialization (Completed)
+-------------------------------------------
+[x] Create directory structure.
+[x] Copy Domain, Application, Infrastructure (Azure/OpenAI), API.
+[x] Remove unused Google/Python services.
+
+Phase 2: SignalR Infrastructure (In Progress)
+---------------------------------------------
+[ ] Define IAudioClient interface (API/Hubs/IAudioClient.cs).
+[ ] Create AudioConversationHub (API/Hubs/AudioConversationHub.cs).
+[ ] Register SignalR in Program.cs.
+
+Phase 3: Streaming Services (Next)
+----------------------------------
+[ ] Add IStreamingSTTService to Infrastructure.
+[ ] Implement AzureRealtimeSTTService with PushStream.
+[ ] Implement ThreadSafeAudioBuffer for side-channel buffer.
+
+Phase 4: Orchestration
+----------------------
+[ ] Create RealtimeAudioOrchestrator.
+[ ] Implement STT -> Buffer -> Commit -> LLM -> TTS pipeline.
+
+Phase 5: Testing
+----------------
+[ ] Create Integration Test for Hub.

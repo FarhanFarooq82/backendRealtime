@@ -1,0 +1,19 @@
+# Task: Debug and Refine Realtime Backend
+
+## Status
+- [x] Verify `IAudioClient` visibility and namespace <!-- id: 0 -->
+- [x] Verify `AudioConversationHub` streaming signature <!-- id: 1 -->
+- [x] Investigate and resolve `/translate-text` 404 issue (HTTP vs SignalR) <!-- id: 2 -->
+- [x] Ensure `Program.cs` correctly maps Controllers and Hubs <!-- id: 3 -->
+- [x] Fix any remaining compilation errors from previous session <!-- id: 4 -->
+- [x] Verify build references for `ConversationMessageModel` and `SpeakerInfo` <!-- id: 5 -->
+
+## Actions Taken
+1. Verified `IAudioClient` interface definition was correct and public.
+2. Verified `AudioConversationHub` uses correct `ChannelReader<string>` for `UploadAudioStream`.
+3. Added `TranslationController.cs` to handle `POST /translate-text` requests, resolving the 404 error and supporting pure text translation HTTP calls (useful for frontend fallback/testing).
+4. Fixed compilation errors in `RealtimeAudioOrchestrator.cs` including:
+    - Ambiguous `VoiceCharacteristics` type (explicitly used namespace).
+    - Mapped `PitchMean` to `FundamentalFrequency`.
+    - Corrected `GenerateResponseAsync` signature.
+5. Successfully ran `dotnet build` with 0 errors.

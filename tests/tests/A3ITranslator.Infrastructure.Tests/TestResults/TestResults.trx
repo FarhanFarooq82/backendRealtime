@@ -1,0 +1,396 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="c3ff3ad1-d51a-4cb6-a9b0-360ef91ee890" name="@Farhans-Air 2025-11-12 22:13:57" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2025-11-12T22:13:57.1085070+01:00" queuing="2025-11-12T22:13:57.1085070+01:00" start="2025-11-12T22:13:55.9807880+01:00" finish="2025-11-12T22:13:57.2080650+01:00" />
+  <TestSettings name="default" id="c59ea673-f3c0-4149-9e9a-6de79d9825e5">
+    <Deployment runDeploymentRoot="_Farhans-Air_2025-11-12_22_13_57" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="4d2ca3b5-340e-427f-ac4a-001384f99385" testId="b2011bfd-e7b0-e45f-cc3c-a19558c7335c" testName="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly" computerName="Farhans-Air" duration="00:00:00.2015977" startTime="2025-11-12T22:13:57.0547030+01:00" endTime="2025-11-12T22:13:57.0547030+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4d2ca3b5-340e-427f-ac4a-001384f99385">
+      <Output>
+        <ErrorInfo>
+          <Message>Expected result.Success to be true, but found False.</Message>
+          <StackTrace>   at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+   at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+   at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+   at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+   at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs:line 88
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="68e4159e-a4ec-48bc-948b-a2779bbf1e24" testId="08d86a54-aa47-3827-81bd-d1042b62ff15" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation" computerName="Farhans-Air" duration="00:00:00.0174623" startTime="2025-11-12T22:13:57.0688820+01:00" endTime="2025-11-12T22:13:57.0688830+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="68e4159e-a4ec-48bc-948b-a2779bbf1e24">
+      <Output>
+        <ErrorInfo>
+          <Message>Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+Status: 401 (PermissionDenied)
+ErrorCode: 401
+
+Content:
+{"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+
+Headers:
+apim-request-id: REDACTED
+Date: Wed, 12 Nov 2025 21:13:56 GMT
+Content-Length: 224
+Content-Type: application/json
+</Message>
+          <StackTrace>   at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+   at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+   at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt) in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs:line 92
+   at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs:line 144
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="39d0be7b-74f0-423a-838d-20cc4ac884c4" testId="38cd1695-ad49-91c0-29c1-9d9c64ed8ab1" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GetServiceName_ShouldReturnCorrectName" computerName="Farhans-Air" duration="00:00:00.0009388" startTime="2025-11-12T22:13:57.0318620+01:00" endTime="2025-11-12T22:13:57.0318630+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="39d0be7b-74f0-423a-838d-20cc4ac884c4" />
+    <UnitTestResult executionId="a8c80b7b-664f-47d1-ab1c-f805d2b391bf" testId="46a29882-988e-3e88-25a7-b21b628efbba" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts" computerName="Farhans-Air" duration="00:00:00.0199975" startTime="2025-11-12T22:13:57.0512800+01:00" endTime="2025-11-12T22:13:57.0512800+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a8c80b7b-664f-47d1-ab1c-f805d2b391bf">
+      <Output>
+        <ErrorInfo>
+          <Message>Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+Status: 401 (PermissionDenied)
+ErrorCode: 401
+
+Content:
+{"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+
+Headers:
+apim-request-id: REDACTED
+Date: Wed, 12 Nov 2025 21:13:56 GMT
+Content-Length: 224
+Content-Type: application/json
+</Message>
+          <StackTrace>   at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+   at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+   at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt) in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs:line 92
+   at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs:line 231
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="610606d8-a984-47c7-9202-49b28d7b9cdf" testId="17e64dcf-fe81-4fef-4a67-b40640531413" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.CheckHealthAsync_WithValidCredentials_ShouldReturnTrue" computerName="Farhans-Air" duration="00:00:00.0006118" startTime="2025-11-12T22:13:57.0910900+01:00" endTime="2025-11-12T22:13:57.0910900+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="610606d8-a984-47c7-9202-49b28d7b9cdf" />
+    <UnitTestResult executionId="47ba297d-09ec-47d9-8dbd-f94e972aeff4" testId="43fb8450-d88b-64cb-6c7e-8350156ab376" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse" computerName="Farhans-Air" duration="00:00:00.0178704" startTime="2025-11-12T22:13:57.0909080+01:00" endTime="2025-11-12T22:13:57.0909090+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="47ba297d-09ec-47d9-8dbd-f94e972aeff4">
+      <Output>
+        <ErrorInfo>
+          <Message>Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+Status: 401 (PermissionDenied)
+ErrorCode: 401
+
+Content:
+{"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+
+Headers:
+apim-request-id: REDACTED
+Date: Wed, 12 Nov 2025 21:13:56 GMT
+Content-Length: 224
+Content-Type: application/json
+</Message>
+          <StackTrace>   at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+   at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+   at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt) in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs:line 92
+   at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs:line 110
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="34660165-8c6f-4469-adc0-3a70228d83e3" testId="4cc5e77e-a405-c214-b838-5fca77c4c266" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithEmptyDeploymentName_ShouldThrowException" computerName="Farhans-Air" duration="00:00:00.0299281" startTime="2025-11-12T22:13:56.8846360+01:00" endTime="2025-11-12T22:13:56.8846440+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="34660165-8c6f-4469-adc0-3a70228d83e3" />
+    <UnitTestResult executionId="868e6cd1-52ca-4f5d-8697-e34428f6d482" testId="14fb1d20-9280-a655-c540-ecdcb894596e" testName="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation" computerName="Farhans-Air" duration="00:00:00.0260483" startTime="2025-11-12T22:13:57.0810400+01:00" endTime="2025-11-12T22:13:57.0810400+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="868e6cd1-52ca-4f5d-8697-e34428f6d482">
+      <Output>
+        <ErrorInfo>
+          <Message>Expected result.Success to be true because Expected success but got error: All GenAI services failed. Last error: Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+Status: 401 (PermissionDenied)
+ErrorCode: 401
+
+Content:
+{"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+
+Headers:
+apim-request-id: REDACTED
+Date: Wed, 12 Nov 2025 21:13:57 GMT
+Content-Length: 224
+Content-Type: application/json
+, but found False.</Message>
+          <StackTrace>   at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+   at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+   at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+   at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+   at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs:line 67
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="6895ce73-c27d-4a5b-9728-aad1e66a1992" testId="1ce34477-0c30-70c4-a86f-dc8522f16778" testName="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.RealService_HealthCheck_ShouldReturnTrue" computerName="Farhans-Air" duration="00:00:00.0015686" startTime="2025-11-12T22:13:57.0823670+01:00" endTime="2025-11-12T22:13:57.0823670+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6895ce73-c27d-4a5b-9728-aad1e66a1992" />
+    <UnitTestResult executionId="e640e343-6583-4d7d-8b2d-16a2bccf016d" testId="ca124e28-2b43-a74b-042a-957442d01b0c" testName="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime" computerName="Farhans-Air" duration="00:00:00.1419526" startTime="2025-11-12T22:13:57.0314060+01:00" endTime="2025-11-12T22:13:57.0314060+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e640e343-6583-4d7d-8b2d-16a2bccf016d">
+      <Output>
+        <ErrorInfo>
+          <Message>Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+Status: 401 (PermissionDenied)
+ErrorCode: 401
+
+Content:
+{"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+
+Headers:
+apim-request-id: REDACTED
+Date: Wed, 12 Nov 2025 21:13:56 GMT
+Content-Length: 224
+Content-Type: application/json
+</Message>
+          <StackTrace>   at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+   at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+   at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt) in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs:line 92
+   at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs:line 312
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="fa96c6b9-6ed0-4808-8c01-07e0feafacff" testId="ab81a4d2-c1da-789a-2f9e-75ef377a9740" testName="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript" computerName="Farhans-Air" duration="00:00:00.0176230" startTime="2025-11-12T22:13:57.1003230+01:00" endTime="2025-11-12T22:13:57.1003230+01:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fa96c6b9-6ed0-4808-8c01-07e0feafacff">
+      <Output>
+        <ErrorInfo>
+          <Message>Expected result.Success to be true, but found False.</Message>
+          <StackTrace>   at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+   at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+   at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+   at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+   at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+   at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript() in /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs:line 108
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="ab81a4d2-c1da-789a-2f9e-75ef377a9740">
+      <Execution id="fa96c6b9-6ed0-4808-8c01-07e0feafacff" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests" name="ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithEmptyDeploymentName_ShouldThrowException" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="4cc5e77e-a405-c214-b838-5fca77c4c266">
+      <Execution id="34660165-8c6f-4469-adc0-3a70228d83e3" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GenerateResponseAsync_WithEmptyDeploymentName_ShouldThrowException" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="14fb1d20-9280-a655-c540-ecdcb894596e">
+      <Execution id="868e6cd1-52ca-4f5d-8697-e34428f6d482" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests" name="ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="08d86a54-aa47-3827-81bd-d1042b62ff15">
+      <Execution id="68e4159e-a4ec-48bc-948b-a2779bbf1e24" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="ca124e28-2b43-a74b-042a-957442d01b0c">
+      <Execution id="e640e343-6583-4d7d-8b2d-16a2bccf016d" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.RealService_HealthCheck_ShouldReturnTrue" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="1ce34477-0c30-70c4-a86f-dc8522f16778">
+      <Execution id="6895ce73-c27d-4a5b-9728-aad1e66a1992" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests" name="RealService_HealthCheck_ShouldReturnTrue" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="46a29882-988e-3e88-25a7-b21b628efbba">
+      <Execution id="a8c80b7b-664f-47d1-ab1c-f805d2b391bf" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GetServiceName_ShouldReturnCorrectName" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="38cd1695-ad49-91c0-29c1-9d9c64ed8ab1">
+      <Execution id="39d0be7b-74f0-423a-838d-20cc4ac884c4" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GetServiceName_ShouldReturnCorrectName" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.CheckHealthAsync_WithValidCredentials_ShouldReturnTrue" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="17e64dcf-fe81-4fef-4a67-b40640531413">
+      <Execution id="610606d8-a984-47c7-9202-49b28d7b9cdf" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="CheckHealthAsync_WithValidCredentials_ShouldReturnTrue" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="43fb8450-d88b-64cb-6c7e-8350156ab376">
+      <Execution id="47ba297d-09ec-47d9-8dbd-f94e972aeff4" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests" name="GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse" />
+    </UnitTest>
+    <UnitTest name="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly" storage="/users/farhanfarooq/documents/github/a3itranslator/backendcsharp/tests/a3itranslator.infrastructure.tests/bin/debug/net8.0/a3itranslator.infrastructure.tests.dll" id="b2011bfd-e7b0-e45f-cc3c-a19558c7335c">
+      <Execution id="4d2ca3b5-340e-427f-ac4a-001384f99385" />
+      <TestMethod codeBase="/Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/bin/Debug/net8.0/A3ITranslator.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests" name="ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="b2011bfd-e7b0-e45f-cc3c-a19558c7335c" executionId="4d2ca3b5-340e-427f-ac4a-001384f99385" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="08d86a54-aa47-3827-81bd-d1042b62ff15" executionId="68e4159e-a4ec-48bc-948b-a2779bbf1e24" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="38cd1695-ad49-91c0-29c1-9d9c64ed8ab1" executionId="39d0be7b-74f0-423a-838d-20cc4ac884c4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46a29882-988e-3e88-25a7-b21b628efbba" executionId="a8c80b7b-664f-47d1-ab1c-f805d2b391bf" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="17e64dcf-fe81-4fef-4a67-b40640531413" executionId="610606d8-a984-47c7-9202-49b28d7b9cdf" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="43fb8450-d88b-64cb-6c7e-8350156ab376" executionId="47ba297d-09ec-47d9-8dbd-f94e972aeff4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4cc5e77e-a405-c214-b838-5fca77c4c266" executionId="34660165-8c6f-4469-adc0-3a70228d83e3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="14fb1d20-9280-a655-c540-ecdcb894596e" executionId="868e6cd1-52ca-4f5d-8697-e34428f6d482" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1ce34477-0c30-70c4-a86f-dc8522f16778" executionId="6895ce73-c27d-4a5b-9728-aad1e66a1992" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ca124e28-2b43-a74b-042a-957442d01b0c" executionId="e640e343-6583-4d7d-8b2d-16a2bccf016d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ab81a4d2-c1da-789a-2f9e-75ef377a9740" executionId="fa96c6b9-6ed0-4808-8c01-07e0feafacff" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="11" executed="11" passed="4" failed="7" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.4.5+1caef2f33e (64-bit .NET 8.0.21)
+[xUnit.net 00:00:00.25]   Discovering: A3ITranslator.Infrastructure.Tests
+[xUnit.net 00:00:00.25]   Discovered:  A3ITranslator.Infrastructure.Tests
+[xUnit.net 00:00:00.26]   Starting:    A3ITranslator.Infrastructure.Tests
+[xUnit.net 00:00:00.45]       Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+[xUnit.net 00:00:00.45]       Status: 401 (PermissionDenied)
+[xUnit.net 00:00:00.45]       ErrorCode: 401
+[xUnit.net 00:00:00.45]       
+[xUnit.net 00:00:00.45]       Content:
+[xUnit.net 00:00:00.45]       {"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+[xUnit.net 00:00:00.45]       
+[xUnit.net 00:00:00.45]       Headers:
+[xUnit.net 00:00:00.45]       apim-request-id: REDACTED
+[xUnit.net 00:00:00.45]       Date: Wed, 12 Nov 2025 21:13:56 GMT
+[xUnit.net 00:00:00.45]       Content-Length: 224
+[xUnit.net 00:00:00.45]       Content-Type: application/json
+[xUnit.net 00:00:00.45]       
+[xUnit.net 00:00:00.45]       Stack Trace:
+[xUnit.net 00:00:00.45]            at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.45]            at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.45]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs(92,0): at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt)
+[xUnit.net 00:00:00.45]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs(312,0): at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime()
+[xUnit.net 00:00:00.45]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.47]       Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+[xUnit.net 00:00:00.47]       Status: 401 (PermissionDenied)
+[xUnit.net 00:00:00.47]       ErrorCode: 401
+[xUnit.net 00:00:00.47]       
+[xUnit.net 00:00:00.47]       Content:
+[xUnit.net 00:00:00.47]       {"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+[xUnit.net 00:00:00.47]       
+[xUnit.net 00:00:00.47]       Headers:
+[xUnit.net 00:00:00.47]       apim-request-id: REDACTED
+[xUnit.net 00:00:00.47]       Date: Wed, 12 Nov 2025 21:13:56 GMT
+[xUnit.net 00:00:00.47]       Content-Length: 224
+[xUnit.net 00:00:00.47]       Content-Type: application/json
+[xUnit.net 00:00:00.47]       
+[xUnit.net 00:00:00.47]       Stack Trace:
+[xUnit.net 00:00:00.47]            at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.47]            at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.47]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs(92,0): at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt)
+[xUnit.net 00:00:00.47]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs(231,0): at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts()
+[xUnit.net 00:00:00.47]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.47]       Expected result.Success to be true, but found False.
+[xUnit.net 00:00:00.47]       Stack Trace:
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+[xUnit.net 00:00:00.47]            at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+[xUnit.net 00:00:00.47]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs(88,0): at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly()
+[xUnit.net 00:00:00.47]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.49]       Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+[xUnit.net 00:00:00.49]       Status: 401 (PermissionDenied)
+[xUnit.net 00:00:00.49]       ErrorCode: 401
+[xUnit.net 00:00:00.49]       
+[xUnit.net 00:00:00.49]       Content:
+[xUnit.net 00:00:00.49]       {"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+[xUnit.net 00:00:00.49]       
+[xUnit.net 00:00:00.49]       Headers:
+[xUnit.net 00:00:00.49]       apim-request-id: REDACTED
+[xUnit.net 00:00:00.49]       Date: Wed, 12 Nov 2025 21:13:56 GMT
+[xUnit.net 00:00:00.49]       Content-Length: 224
+[xUnit.net 00:00:00.49]       Content-Type: application/json
+[xUnit.net 00:00:00.49]       
+[xUnit.net 00:00:00.49]       Stack Trace:
+[xUnit.net 00:00:00.49]            at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.49]            at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.49]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs(92,0): at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt)
+[xUnit.net 00:00:00.49]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs(144,0): at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation()
+[xUnit.net 00:00:00.49]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.50]       Expected result.Success to be true because Expected success but got error: All GenAI services failed. Last error: Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+[xUnit.net 00:00:00.50]       Status: 401 (PermissionDenied)
+[xUnit.net 00:00:00.50]       ErrorCode: 401
+[xUnit.net 00:00:00.50]       
+[xUnit.net 00:00:00.50]       Content:
+[xUnit.net 00:00:00.50]       {"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+[xUnit.net 00:00:00.50]       
+[xUnit.net 00:00:00.50]       Headers:
+[xUnit.net 00:00:00.50]       apim-request-id: REDACTED
+[xUnit.net 00:00:00.50]       Date: Wed, 12 Nov 2025 21:13:57 GMT
+[xUnit.net 00:00:00.50]       Content-Length: 224
+[xUnit.net 00:00:00.50]       Content-Type: application/json
+[xUnit.net 00:00:00.50]       , but found False.
+[xUnit.net 00:00:00.50]       Stack Trace:
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+[xUnit.net 00:00:00.50]            at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+[xUnit.net 00:00:00.50]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs(67,0): at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation()
+[xUnit.net 00:00:00.50]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.51]       Azure.RequestFailedException : Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.
+[xUnit.net 00:00:00.51]       Status: 401 (PermissionDenied)
+[xUnit.net 00:00:00.51]       ErrorCode: 401
+[xUnit.net 00:00:00.51]       
+[xUnit.net 00:00:00.51]       Content:
+[xUnit.net 00:00:00.51]       {"error":{"code":"401","message":"Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."}}
+[xUnit.net 00:00:00.51]       
+[xUnit.net 00:00:00.51]       Headers:
+[xUnit.net 00:00:00.51]       apim-request-id: REDACTED
+[xUnit.net 00:00:00.51]       Date: Wed, 12 Nov 2025 21:13:56 GMT
+[xUnit.net 00:00:00.51]       Content-Length: 224
+[xUnit.net 00:00:00.51]       Content-Type: application/json
+[xUnit.net 00:00:00.51]       
+[xUnit.net 00:00:00.51]       Stack Trace:
+[xUnit.net 00:00:00.51]            at Azure.Core.HttpPipelineExtensions.ProcessMessageAsync(HttpPipeline pipeline, HttpMessage message, RequestContext requestContext, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.51]            at Azure.AI.OpenAI.OpenAIClient.GetChatCompletionsAsync(ChatCompletionsOptions chatCompletionsOptions, CancellationToken cancellationToken)
+[xUnit.net 00:00:00.51]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/src/A3ITranslator.Infrastructure/Services/Azure/AzureGenAIService.cs(92,0): at A3ITranslator.Infrastructure.Services.Azure.AzureGenAIService.GenerateResponseAsync(String systemPrompt, String userPrompt)
+[xUnit.net 00:00:00.51]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Azure/AzureGenAIServiceRealApiTests.cs(110,0): at A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse()
+[xUnit.net 00:00:00.51]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.52]       Expected result.Success to be true, but found False.
+[xUnit.net 00:00:00.52]       Stack Trace:
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.XUnit2TestFramework.Throw(String message)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.TestFrameworkProvider.Throw(String message)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.DefaultAssertionStrategy.HandleFailure(String message)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.AssertionScope.FailWith(Func`1 failReasonFunc)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Execution.AssertionScope.FailWith(String message, Object[] args)
+[xUnit.net 00:00:00.52]            at FluentAssertions.Primitives.BooleanAssertions`1.BeTrue(String because, Object[] becauseArgs)
+[xUnit.net 00:00:00.52]         /Users/farhanfarooq/Documents/GitHub/A3ITranslator/backendCSharp/tests/A3ITranslator.Infrastructure.Tests/Services/Translation/TranslationOrchestratorIntegrationTests.cs(108,0): at A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript()
+[xUnit.net 00:00:00.52]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.52]   Finished:    A3ITranslator.Infrastructure.Tests
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.0321340+01:00">
+        <Text>[xUnit.net 00:00:00.45]     A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_PerformanceTest_ShouldCompleteWithinReasonableTime [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.0514110+01:00">
+        <Text>[xUnit.net 00:00:00.47]     A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithComplexTranslationPrompt_ShouldHandleContextAndFacts [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.0547170+01:00">
+        <Text>[xUnit.net 00:00:00.47]     A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithUrduToDanish_ShouldTranslateCorrectly [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.0689340+01:00">
+        <Text>[xUnit.net 00:00:00.49]     A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithDanishToEnglish_ShouldReturnValidTranslation [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.0810170+01:00">
+        <Text>[xUnit.net 00:00:00.50]     A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithRealService_ShouldReturnValidTranslation [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.1115050+01:00">
+        <Text>[xUnit.net 00:00:00.51]     A3ITranslator.Infrastructure.Tests.Services.Azure.AzureGenAIServiceRealApiTests.GenerateResponseAsync_WithValidPrompts_ShouldReturnTranslationResponse [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="Farhans-Air" outcome="Error" timestamp="2025-11-12T22:13:57.1116210+01:00">
+        <Text>[xUnit.net 00:00:00.52]     A3ITranslator.Infrastructure.Tests.Services.Translation.TranslationOrchestratorIntegrationTests.ProcessTranslationAsync_WithEnglishToUrdu_ShouldUseNativeScript [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+    <CollectorDataEntries>
+      <Collector agentName="Farhans-Air" uri="datacollector://microsoft/CoverletCodeCoverage/1.0" collectorDisplayName="XPlat code coverage">
+        <UriAttachments>
+          <UriAttachment>
+            <A href="Farhans-Air/coverage.cobertura.xml"></A>
+          </UriAttachment>
+        </UriAttachments>
+      </Collector>
+    </CollectorDataEntries>
+  </ResultSummary>
+</TestRun>

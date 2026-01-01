@@ -1,0 +1,67 @@
+# Frontend Implementation Prompt: Real-Time Audio Translation Client
+
+## Objective
+Implement a React/TypeScript frontend client that connects to the `backendrealtime` SignalR service. The goal is to enable low-latency, full-duplex audio translation where the user speaks, and the system responds with streaming audio and text validation.
+
+## Architecture Overview
+- **VAD (Voice Activity Detection)**: Use `hark` to detect speech start/stop.
+- **Transport**: `Microsoft SignalR` (WebSockets) for bidirectional streaming.
+- **Format**: 16kHz Mono PCM (converted to Base64 for transport).
+
+## Detailed Requirements
+
+### 1. SignalR Connection
+- **Library**: Install `@microsoft/signalr`.
+- **Endpoint**: Connect to `http://localhost:5000/audioHub` (or configured API URL).
+- **Query Params**: You MUST send `?sessionId=<GUID>` in the connection URL.
+    - If starting a new chat: Generate a GUID locally or use `uuid`.
+    - If resuming: Use the existing GUID.
+- **Lifecycle**: Connect on component mount, disconnect on unmount. Auto-reconnect enabled.
+
+### 2. Audio Recording (Input)
+- Use `navigator.mediaDevices.getUserMedia({ audio: true })`.
+- Use `hark` to detect silence (e.g., threshold -50db, interval 3s).
+- **Streaming Logic**:
+    - When `hark` says `speaking`: Start a SignalR Stream (`UploadAudioStream`).
+    - **Chunking**: Read raw audio bytes (Float32Array from AudioContext), downsample to 16kHz, convert to 16-bit PCM, then Base64.
+    - **Send**: Yield these Base64 stings into the SignalR stream constantly while speaking.
+    - When `hark` says `stopped`:
+        - Close the client-side uploading stream.
+        - Call `hubConnection.invoke("CommitUtterance")` to trigger the backend pipeline.
+
+### 3. Server-to-Client Events (Protocol)
+Implement handlers for the following Hub events:
+
+#### A. `ReceiveTranscription(text: string, language: string, isFinal: bool)`
+- **Behavior**: Update the UI text display in real-time.
+- If `isFinal` is false: Show as gray/italic (unstable).
+- If `isFinal` is true: Append to the main conversation history.
+
+#### B. `ReceiveSpeakerUpdate(speaker: SpeakerInfo)`
+- **Payload**: `{ displayName: string, confidence: number, characteristics: { gender: string } }`
+- **Behavior**: Update the "Current Speaker" indicator in the UI.
+
+#### C. `ReceiveAudioChunk(base64Chunk: string)`
+- **Behavior**:
+    - Do NOT play immediately (jitter risk).
+    - Push to a `PlayQueue`.
+    - Have a dedicated "Audio Player" loop that dequeues chunks, decodes Base64 to ArrayBuffer, and plays them using `AudioContext.createBufferSource()`.
+    - Ensure gapless playback by scheduling the next chunk at the exact end time of the previous one (`audioCtx.currentTime + duration`).
+
+#### D. `ReceiveTransactionComplete()`
+- **Behavior**:
+    - Signal that the turn is over.
+    - If "Auto-Listen" mode is on: Reactivate the microphone/Hark listener after the Audio Queue finishes playing.
+    - Update UI state from "Processing/Speaking" to "Ready".
+    - Clear any temporary buffers.
+
+### 4. Code Structure Recommendation
+- Create a hook `useRealtimeTranslator.ts`:
+    - Manages SignalR connection.
+    - Manages AudioContext and Hark.
+    - Exposes state: `isConnected`, `isRecording`, `isSpeaking`, `transcript`, `currentSpeaker`.
+    - Exposes controls: `startSession()`, `endSession()`.
+
+## Non-Functional Requirements
+- **Latency**: Minimize buffer sizes (e.g., 4096 frames) for faster streaming.
+- **Feedback**: Show a visualizer or wave-form while the user speaks.

@@ -1,0 +1,102 @@
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options; // ✅ Add this for IOptions
+using A3ITranslator.API.Hubs;
+using A3ITranslator.API.Services;
+using A3ITranslator.Application.Services;
+using A3ITranslator.Infrastructure.Services.Audio;
+using A3ITranslator.Application.Orchestration;
+using A3ITranslator.Infrastructure.Services;
+using A3ITranslator.Infrastructure.Services.Azure;
+using A3ITranslator.Infrastructure.Configuration; // ✅ Add this for ServiceOptions
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ✅ Log environment for debugging
+Console.WriteLine($"🔧 Running in environment: {builder.Environment.EnvironmentName}");
+Console.WriteLine($"🔧 Configuration sources: {string.Join(", ", builder.Configuration.Sources.Select(s => s.GetType().Name))}");
+
+// ✅ CRITICAL: Configure ServiceOptions binding
+builder.Services.Configure<ServiceOptions>(
+    builder.Configuration.GetSection(ServiceOptions.SectionName));
+
+// Add API Controllers
+builder.Services.AddControllers();
+
+// Add API Explorer for development
+builder.Services.AddEndpointsApiExplorer();
+
+// SignalR Configuration
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+    options.StreamBufferCapacity = 50;
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.HandshakeTimeout = TimeSpan.FromSeconds(30);
+});
+
+// ✅ Fixed Service Registration - Managers MUST be Singletons to hold state across Hub calls
+builder.Services.AddSingleton<ISessionManager, SessionManager>();
+builder.Services.AddSingleton<IConnectionManager, ConnectionManager>();
+
+// 🔥 CRITICAL FIX: STT services must be SINGLETONS to maintain chunk accumulation state
+// Scoped services get recreated for each request, losing accumulated audio buffers
+builder.Services.AddSingleton<GoogleStreamingSTTService>(); // ✅ SINGLETON: Maintains chunk state
+builder.Services.AddSingleton<AzureStreamingSTTService>();  // ✅ SINGLETON: Maintains chunk state
+builder.Services.AddSingleton<IStreamingSTTService, STTOrchestrator>(); // ✅ SINGLETON: Uses singleton services
+
+// 🎵 Audio Test Collector - DEBUG ONLY service for testing audio reception
+builder.Services.AddSingleton<AudioTestCollector>(); // ✅ SINGLETON: Accumulates audio chunks for testing
+
+// ✅ Audio Processing Services - Orchestrators need to be singletons for state consistency
+builder.Services.AddSingleton<IRealtimeAudioOrchestrator, RealtimeAudioOrchestrator>();
+builder.Services.AddSingleton<ISttProcessor, SttProcessor>();
+
+// 🔧 Non-stateful services upgraded to Singleton for Orchestrator compatibility
+builder.Services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
+builder.Services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
+builder.Services.AddSingleton<IRealtimeNotificationService, RealtimeNotificationService>();
+builder.Services.AddSingleton<IGenAIService, AzureGenAIService>();
+builder.Services.AddSingleton<IStreamingTTSService, StreamingTTSService>();
+builder.Services.AddSingleton<IFactExtractionService, FactExtractionService>();
+
+// TODO: Add these when they exist
+// builder.Services.AddScoped<IStreamingTranslationService, StreamingTranslationService>();
+
+// Logging
+builder.Services.AddLogging(logging =>
+{
+    logging.AddConsole();
+    logging.AddDebug();
+    logging.SetMinimumLevel(LogLevel.Information);
+});
+
+// CORS for SignalR
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("RealtimeOnly", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000", "https://yourdomain.com", "http://127.0.0.1:3000")
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .AllowCredentials();
+    });
+});
+
+var app = builder.Build();
+
+app.UseCors("RealtimeOnly");
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+
+// Add API routing
+app.MapControllers();
+app.MapHub<AudioConversationHub>("/audio-hub");
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "realtime-audio" }));
+
+app.Run();
