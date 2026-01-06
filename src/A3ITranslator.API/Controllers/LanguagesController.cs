@@ -16,67 +16,47 @@ public class LanguagesController : ControllerBase
 
     /// <summary>
     /// Get supported languages for the realtime translation service
-    /// Combines Azure and Google STT languages, avoiding duplicates by BCP-47 code
+    /// Uses updated Google STT languages from official documentation
     /// </summary>
     [HttpGet]
     public ActionResult<object> GetSupportedLanguages()
     {
-        // Get Azure languages (primary source)
-        var azureLanguages = AzureStreamingSTTService.AzureSTTLanguages;
-        
-        // Get Google languages  
+        // Use Google languages as primary source (updated from official documentation)
         var googleLanguages = GoogleStreamingSTTService.GoogleSTTLanguages;
         
-        // Create union avoiding duplicates by exact BCP-47 code
-        var languageMap = new Dictionary<string, object>();
+        // Create language response objects
+        var languageList = new List<object>();
         
-        // Add Azure languages first (priority)
-        foreach (var lang in azureLanguages)
+        foreach (var lang in googleLanguages)
         {
             var (countryCode, flag) = GetCountryInfo(lang.Key);
             
-            languageMap[lang.Key] = new
+            languageList.Add(new
             {
                 code = lang.Key,
                 name = lang.Value,
                 countryCode = countryCode,
                 flag = flag,
-                provider = "azure"
-            };
-        }
-        
-        // Add Google languages if code doesn't already exist
-        foreach (var lang in googleLanguages)
-        {
-            if (!languageMap.ContainsKey(lang.Key))
-            {
-                var (countryCode, flag) = GetCountryInfo(lang.Key);
-                
-                languageMap[lang.Key] = new
-                {
-                    code = lang.Key,
-                    name = lang.Value,
-                    countryCode = countryCode,
-                    flag = flag,
-                    provider = "google"
-                };
-            }
+                provider = "google"
+            });
         }
 
         // Sort by BCP-47 code
-        var sortedLanguages = languageMap.Values
+        var sortedLanguages = languageList
             .OrderBy(l => ((dynamic)l).code)
             .ToArray();
 
-        _logger.LogInformation("Languages endpoint called, returning {Count} unique languages (Azure: {AzureCount}, Google: {GoogleCount})", 
-            sortedLanguages.Length, azureLanguages.Count, googleLanguages.Count);
+        _logger.LogInformation("Languages endpoint called, returning {Count} Google STT languages", 
+            sortedLanguages.Length);
 
         return Ok(new
         {
             languages = sortedLanguages,
             count = sortedLanguages.Length,
-            providers = new { azure = azureLanguages.Count, google = googleLanguages.Count },
-            service = "realtime-audio"
+            provider = "google",
+            service = "realtime-audio",
+            lastUpdated = "2025-01-05", // Updated with official Google Cloud documentation
+            documentation = "https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages"
         });
     }
 
@@ -86,18 +66,22 @@ public class LanguagesController : ControllerBase
     [HttpGet("{code}")]
     public ActionResult<object> GetLanguageByCode(string code)
     {
-        // Get all languages first
-        var allLanguages = GetSupportedLanguages().Value;
-        var languagesObj = (dynamic)allLanguages;
-        var languages = languagesObj.languages;
+        // Get Google languages
+        var googleLanguages = GoogleStreamingSTTService.GoogleSTTLanguages;
         
         // Find by exact BCP-47 code
-        foreach (dynamic lang in languages)
+        if (googleLanguages.TryGetValue(code, out var languageName))
         {
-            if (string.Equals(lang.code, code, StringComparison.OrdinalIgnoreCase))
+            var (countryCode, flag) = GetCountryInfo(code);
+            
+            return Ok(new
             {
-                return Ok(lang);
-            }
+                code = code,
+                name = languageName,
+                countryCode = countryCode,
+                flag = flag,
+                provider = "google"
+            });
         }
 
         return NotFound(new { error = "Language not found", code = code });
@@ -108,18 +92,52 @@ public class LanguagesController : ControllerBase
     /// </summary>
     private (string countryCode, string flag) GetCountryInfo(string bcp47Code)
     {
-        // Extract country code from BCP-47 format (e.g., "en-US" -> "US")
+        // Handle special Google language codes
+        var countryCode = bcp47Code switch
+        {
+            // Chinese variants with special formats
+            "cmn-Hans-CN" => "CN",
+            "cmn-Hant-TW" => "TW", 
+            "yue-Hant-HK" => "HK",
+            
+            // Spanish Latin American
+            "es-419" => "419",
+            
+            // Arabic pseudo-accents
+            "ar-XA" => "XA",
+            
+            // General Swahili (no country)
+            "sw" => "KE", // Default to Kenya for Swahili
+            
+            // General Somali (no country)
+            "so-SO" => "SO",
+            
+            // Punjabi Gurmukhi (special script indicator)
+            "pa-Guru-IN" => "IN",
+            
+            // Default BCP-47 parsing
+            _ => ExtractCountryFromBcp47(bcp47Code)
+        };
+        
+        var flag = GetCountryFlag(countryCode);
+        return (countryCode, flag);
+    }
+    
+    /// <summary>
+    /// Extract country code from standard BCP-47 format
+    /// </summary>
+    private string ExtractCountryFromBcp47(string bcp47Code)
+    {
         var parts = bcp47Code.Split('-');
         if (parts.Length < 2)
         {
             // No country code, use language-based default
-            return GetDefaultCountryForLanguage(parts[0]);
+            var (defaultCountry, _) = GetDefaultCountryForLanguage(parts[0]);
+            return defaultCountry;
         }
 
-        var countryCode = parts[1].ToUpperInvariant();
-        var flag = GetCountryFlag(countryCode);
-        
-        return (countryCode, flag);
+        // Return the last part which should be the country code
+        return parts[^1].ToUpperInvariant();
     }
 
     /// <summary>
@@ -159,34 +177,71 @@ public class LanguagesController : ControllerBase
             "AU" => "🇦🇺", // Australia
             "CA" => "🇨🇦", // Canada
             "IN" => "🇮🇳", // India
+            "PH" => "🇵🇭", // Philippines
             "ES" => "🇪🇸", // Spain
             "MX" => "🇲🇽", // Mexico
             "FR" => "🇫🇷", // France
+            "BR" => "🇧🇷", // Brazil
+            "PT" => "🇵🇹", // Portugal
+            "CN" => "🇨🇳", // China
+            "TW" => "🇹🇼", // Taiwan
+            "HK" => "🇭🇰", // Hong Kong
             "DE" => "🇩🇪", // Germany
             "IT" => "🇮🇹", // Italy
             "JP" => "🇯🇵", // Japan
             "KR" => "🇰🇷", // South Korea
-            "BR" => "🇧🇷", // Brazil
-            "PT" => "🇵🇹", // Portugal
-            "RU" => "🇷🇺", // Russia
+            "RU" => "🇺", // Russia
             "NL" => "🇳🇱", // Netherlands
-            "SE" => "🇸🇪", // Sweden
-            "DK" => "🇩🇰", // Denmark
-            "NO" => "🇳🇴", // Norway
-            "FI" => "🇫🇮", // Finland
-            "PL" => "🇵🇱", // Poland
+            "TR" => "�🇷", // Turkey
+            "PL" => "�🇵�", // Poland
             "CZ" => "🇨🇿", // Czech Republic
+            "SK" => "🇸🇰", // Slovakia
             "HU" => "🇭🇺", // Hungary
-            "TR" => "🇹🇷", // Turkey
-            "TH" => "🇹🇭", // Thailand
+            "RO" => "🇷�", // Romania
+            "BG" => "🇧🇬", // Bulgaria
+            "HR" => "��", // Croatia
+            "RS" => "🇷🇸", // Serbia
+            "SI" => "🇸�", // Slovenia
+            "MK" => "�🇰", // North Macedonia
+            "GR" => "🇬🇷", // Greece
+            "EE" => "��", // Estonia
+            "LV" => "🇱🇻", // Latvia
+            "LT" => "��", // Lithuania
+            "FI" => "��", // Finland
+            "SE" => "��", // Sweden
+            "DK" => "��", // Denmark
+            "NO" => "��", // Norway
+            "IS" => "��", // Iceland
             "VN" => "🇻🇳", // Vietnam
+            "TH" => "🇹🇭", // Thailand
             "ID" => "🇮🇩", // Indonesia
             "MY" => "🇲🇾", // Malaysia
-            "PK" => "🇵🇰", // Pakistan
             "BD" => "🇧🇩", // Bangladesh
-            "CN" => "🇨🇳", // China
-            "TW" => "🇹🇼", // Taiwan
-            "HK" => "🇭🇰", // Hong Kong
+            "PK" => "🇵🇰", // Pakistan
+            "NP" => "🇳🇵", // Nepal
+            "ZA" => "🇿🇦", // South Africa
+            "ET" => "🇪🇹", // Ethiopia
+            "AZ" => "🇦🇿", // Azerbaijan
+            "BY" => "🇧�", // Belarus
+            "BA" => "🇧🇦", // Bosnia and Herzegovina
+            "IR" => "🇮🇷", // Iran
+            "IE" => "🇮🇪", // Ireland
+            "NG" => "🇳🇬", // Nigeria
+            "IL" => "🇮🇱", // Israel
+            "AM" => "🇦🇲", // Armenia
+            "GE" => "🇬🇪", // Georgia
+            "KZ" => "🇰🇿", // Kazakhstan
+            "KH" => "🇰🇭", // Cambodia
+            "KG" => "🇰🇬", // Kyrgyzstan
+            "LA" => "🇱🇦", // Laos
+            "MN" => "�🇳", // Mongolia
+            "MM" => "🇲🇲", // Myanmar
+            "SO" => "🇸🇴", // Somalia
+            "AL" => "🇦🇱", // Albania
+            "KE" => "🇰🇪", // Kenya
+            "TJ" => "🇹�", // Tajikistan
+            "UA" => "��", // Ukraine
+            "UZ" => "🇺🇿", // Uzbekistan
             "SA" => "🇸🇦", // Saudi Arabia
             "EG" => "🇪🇬", // Egypt
             "AE" => "🇦🇪", // UAE
@@ -203,6 +258,10 @@ public class LanguagesController : ControllerBase
             "TN" => "🇹🇳", // Tunisia
             "DZ" => "🇩🇿", // Algeria
             "MA" => "🇲🇦", // Morocco
+            "MR" => "🇲🇷", // Mauritania
+            "PS" => "🇵🇸", // Palestine
+            "419" => "🌎", // Latin America
+            "XA" => "🌐", // Pseudo-Accents
             _ => "🌐" // Default for unknown countries
         };
     }

@@ -1,0 +1,22 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "C# A3ITranslator realtime API",
+            "type": "dotnet",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "projectPath": "${workspaceFolder}/src/A3ITranslator.API/A3ITranslator.API.csproj"
+        },
+        {
+            "name": "C# A3ITranslator realtime API (Watch Mode)", 
+            "type": "dotnet",
+            "request": "launch",
+            "preLaunchTask": "watch",
+            "projectPath": "${workspaceFolder}/src/A3ITranslator.API/A3ITranslator.API.csproj"
+        }
+    ]
+}

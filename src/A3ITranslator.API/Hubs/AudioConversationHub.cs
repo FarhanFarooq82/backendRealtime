@@ -3,50 +3,58 @@ using Microsoft.Extensions.Logging;
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.Models;
 using A3ITranslator.Application.Interfaces;
-using A3ITranslator.Application.Orchestration;
 using A3ITranslator.Infrastructure.Services.Audio;
 using A3ITranslator.Infrastructure.Helpers;
 using System.Threading.Channels;
+using MediatR;
+using A3ITranslator.Application.Features.Conversation.Commands.StartSession;
+using A3ITranslator.Application.Features.Conversation.Commands.CommitUtterance;
+using A3ITranslator.Application.Features.AudioProcessing.Commands.ProcessAudioChunk;
+using A3ITranslator.Application.Domain.Interfaces;
 
 namespace A3ITranslator.API.Hubs;
 
 /// <summary>
-/// Clean SignalR Hub - no infrastructure dependencies
+/// Clean SignalR Hub - Pure Domain Architecture
 /// </summary>
 public class AudioConversationHub : Hub<IAudioClient>, IDisposable
 {
     private readonly ILogger<AudioConversationHub> _logger;
-    private readonly ISessionManager _sessionManager;
+    private readonly ISessionRepository _sessionRepository; // ✅ Only Domain interface
     private readonly ILanguageDetectionService _languageService;
     private readonly ISttProcessor _sttProcessor;
-    private readonly IRealtimeAudioOrchestrator _orchestrator;
-    private readonly AudioTestCollector _audioTestCollector; // 🎵 DEBUG: Audio test collector
+    private readonly IMediator _mediator;
+    private readonly AudioTestCollector _audioTestCollector;
     private readonly CancellationTokenSource _hubCancellationTokenSource = new();
     private bool _disposed = false;
 
-    // ✅ Clean constructor - all dependencies are abstractions
+    // ✅ Clean constructor - Pure Domain Architecture
     public AudioConversationHub(
         ILogger<AudioConversationHub> logger,
-        IConnectionManager connectionManager, // Still here for interface but we'll stop using it
-        ISessionManager sessionManager,
+        ISessionRepository sessionRepository, // ✅ Only Domain interface
         ILanguageDetectionService languageService,
         ISttProcessor sttProcessor,
-        IRealtimeAudioOrchestrator orchestrator,
-        AudioTestCollector audioTestCollector) // 🎵 DEBUG: Inject audio test collector
+        IMediator mediator,
+        AudioTestCollector audioTestCollector)
     {
         _logger = logger;
-        _sessionManager = sessionManager;
+        _sessionRepository = sessionRepository;
         _languageService = languageService;
         _sttProcessor = sttProcessor;
-        _orchestrator = orchestrator;
-        _audioTestCollector = audioTestCollector; // 🎵 DEBUG: Assign audio test collector
+        _mediator = mediator;
+        _audioTestCollector = audioTestCollector;
     }
 
     public override async Task OnConnectedAsync()
     {
+        var connectionId = Context.ConnectionId;
+        Console.WriteLine($"🔌 CONSOLE: OnConnectedAsync ENTRY for {connectionId}");
+        _logger.LogInformation("🔌 OnConnectedAsync ENTRY for {ConnectionId}", connectionId);
+        
         try
         {
-            _logger.LogInformation("🔌 New SignalR connection: {ConnectionId}", Context.ConnectionId);
+            _logger.LogInformation("🔌 New SignalR connection: {ConnectionId}", connectionId);
+            Console.WriteLine($"🔌 CONSOLE: New SignalR connection: {connectionId}");
             
             var httpContext = Context.GetHttpContext();
             string sessionId = httpContext?.Request.Query["sessionId"].ToString() ?? string.Empty;
@@ -55,12 +63,22 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
 
             _logger.LogInformation("📋 Connection parameters - SessionId: {SessionId}, Primary: {Primary}, Secondary: {Secondary}", 
                 sessionId, primaryLang, secondaryLang);
+            Console.WriteLine($"📋 CONSOLE: Connection parameters - SessionId: {sessionId}, Primary: {primaryLang}, Secondary: {secondaryLang}");
 
-            // 🔥 CRITICAL: Use the unified SessionManager to create/init the session
-            var session = await _sessionManager.CreateSessionAsync(
-                Context.ConnectionId, sessionId, primaryLang, secondaryLang);
+            // ✅ PURE DOMAIN ARCHITECTURE: Create session via Command
+            Console.WriteLine($"🔥 CONSOLE: About to create session for {Context.ConnectionId}");
+            await _mediator.Send(new StartSessionCommand(Context.ConnectionId, sessionId, primaryLang, secondaryLang));
+            Console.WriteLine($"✅ CONSOLE: Session created successfully for {Context.ConnectionId}");
+
+            // Get the created session from repository
+            var session = await _sessionRepository.GetByConnectionIdAsync(Context.ConnectionId, CancellationToken.None);
+            if (session == null)
+            {
+                throw new InvalidOperationException($"Failed to create session for {Context.ConnectionId}");
+            }
             
             _logger.LogInformation("✅ Conversation session created: {SessionId}", session.SessionId);
+            Console.WriteLine($"✅ CONSOLE: Conversation session created: {session.SessionId}");
 
             // 🎵 DEBUG: Start audio test collection immediately when session starts
             _audioTestCollector.StartCollection(session.SessionId);
@@ -69,64 +87,71 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
             await Clients.Caller.ReceiveTranscription("Connected successfully", "system", true);
 
             // Delegate language detection to service
+            Console.WriteLine($"🔍 CONSOLE: About to call GetOrDetectLanguageAsync for {Context.ConnectionId}");
             var languageResult = await _languageService.GetOrDetectLanguageAsync(
                 session.SessionId, 
                 new[] { session.PrimaryLanguage, session.SecondaryLanguage ?? "en-US" },
                 session);
+            Console.WriteLine($"🔍 CONSOLE: GetOrDetectLanguageAsync completed for {Context.ConnectionId}");
 
             // 🔍 DEBUG: Log the language detection result
             _logger.LogInformation("🎯 Language detection result - IsKnown: {IsKnown}, RequiresDetection: {RequiresDetection}, Language: {Language}", 
                 languageResult.IsKnown, languageResult.RequiresDetection, languageResult.Language);
+            Console.WriteLine($"🎯 CONSOLE: Language detection result - IsKnown: {languageResult.IsKnown}, RequiresDetection: {languageResult.RequiresDetection}, Language: {languageResult.Language}");
 
-            // Start STT processing with proper exception handling and cancellation
+            // 🌍 SIMPLIFIED: Always use Google Auto-Detection for all cases
+            var candidateLanguages = languageResult.IsKnown 
+                ? new[] { languageResult.Language } 
+                : languageResult.CandidateLanguages;
+
             if (languageResult.IsKnown)
             {
-                _logger.LogInformation("🎯 Using known language {Language} for {ConnectionId} - Starting background processing", 
-                    languageResult.Language, Context.ConnectionId);
-                    
                 await Clients.Caller.ReceiveDominantLanguageDetected(languageResult.Language);
-                
-                // 🔥 CRITICAL FIX: Run in background so OnConnectedAsync can complete
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _sttProcessor.StartSingleLanguageProcessingAsync(
-                            Context.ConnectionId, languageResult.Language, _hubCancellationTokenSource.Token);
-                    }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "❌ STT processing failed for {ConnectionId}", Context.ConnectionId);
-                    }
-                }, _hubCancellationTokenSource.Token);
             }
-            else if (languageResult.RequiresDetection)
+
+            _logger.LogInformation("🌍 Starting Google auto-detection for {ConnectionId} with candidates: [{Languages}]", 
+                Context.ConnectionId, string.Join(", ", candidateLanguages));
+            Console.WriteLine($"🌍 CONSOLE: Starting Google auto-detection for {Context.ConnectionId} with candidates: [{string.Join(", ", candidateLanguages)}]");
+                
+            _ = Task.Run(async () =>
             {
-                _logger.LogInformation("🔍 Starting background language detection for {ConnectionId}", Context.ConnectionId);
-                
-                // 🔥 CRITICAL FIX: Run in background so OnConnectedAsync can complete
-                _ = Task.Run(async () =>
+                try
                 {
-                    try
-                    {
-                        await _sttProcessor.StartMultiLanguageDetectionAsync(
-                            Context.ConnectionId, languageResult.CandidateLanguages, _hubCancellationTokenSource.Token);
-                    }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "❌ Language detection failed for {ConnectionId}", Context.ConnectionId);
-                    }
-                }, _hubCancellationTokenSource.Token);
-            }
+                    Console.WriteLine($"🌍 CONSOLE: Inside Task.Run - calling StartAutoLanguageDetectionAsync for {connectionId}");
+                    
+                    await _sttProcessor.StartAutoLanguageDetectionAsync(
+                        connectionId, candidateLanguages, _hubCancellationTokenSource.Token);
+                    Console.WriteLine($"🏁 CONSOLE: StartAutoLanguageDetectionAsync completed for {connectionId}");
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("🛑 Google auto-detection cancelled for {ConnectionId}", connectionId);
+                    Console.WriteLine($"🛑 CONSOLE: Google auto-detection cancelled for {connectionId}");
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    _logger.LogInformation("🛑 Google auto-detection stopped - resources disposed for {ConnectionId}", connectionId);
+                    Console.WriteLine($"🛑 CONSOLE: Google auto-detection stopped - resources disposed for {connectionId}: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Google auto-detection failed for {ConnectionId}", connectionId);
+                    Console.WriteLine($"❌ CONSOLE: Google auto-detection failed for {connectionId}: {ex.Message}");
+                    Console.WriteLine($"❌ CONSOLE: Stack trace: {ex.StackTrace}");
+                }
+            });
+            
+            Console.WriteLine($"🌍 CONSOLE: Task.Run created for Google auto-detection for {connectionId}");
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"❌ CONSOLE: CRITICAL ERROR in OnConnectedAsync for {Context.ConnectionId}: {ex.Message}");
+            Console.WriteLine($"❌ CONSOLE: Stack trace: {ex.StackTrace}");
             _logger.LogError(ex, "❌ Critical error in OnConnectedAsync for {ConnectionId}", Context.ConnectionId);
             await Clients.Caller.ReceiveError($"Connection failed: {ex.Message}");
         }
         
+        Console.WriteLine($"🏁 CONSOLE: OnConnectedAsync COMPLETED for {Context.ConnectionId}");
         await base.OnConnectedAsync();
     }
 
@@ -151,9 +176,6 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
             _logger.LogError(ex, "❌ Error stopping audio test collector for {ConnectionId}", Context.ConnectionId);
         }
         
-        // 🎵 DEBUG: Cleanup audio debug files for disconnected client
-        _orchestrator.CleanupAudioDebug(Context.ConnectionId);
-        
         // Cancel all pending operations for this hub
         if (!_hubCancellationTokenSource.Token.IsCancellationRequested)
         {
@@ -162,7 +184,17 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
         
         try
         {
-            await _sessionManager.EndSessionAsync(Context.ConnectionId);
+            // ✅ PURE DOMAIN: End session via repository
+            var session = await _sessionRepository.GetByConnectionIdAsync(Context.ConnectionId, CancellationToken.None);
+            if (session != null)
+            {
+                // End session and close audio stream
+                session.EndSession(A3ITranslator.Application.Domain.Entities.SessionStatus.Completed);
+                await _sessionRepository.SaveAsync(session, CancellationToken.None);
+            }
+
+            // 🧹 Cleanup utterance collectors to prevent memory leaks
+            _sttProcessor.CleanupConnection(Context.ConnectionId);
         }
         catch (Exception ex)
         {
@@ -217,7 +249,7 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
             {
                 while (stream.TryRead(out var base64Chunk))
                 {
-                    await _orchestrator.ProcessAudioChunkAsync(Context.ConnectionId, base64Chunk);
+                    await _mediator.Send(new ProcessAudioChunkCommand(Context.ConnectionId, base64Chunk));
                 }
             }
         }
@@ -236,7 +268,6 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
             string audioData = "";
             string sessionId = "unknown";
             string chunkId = "unknown";
-            bool isEnhancedPayload = false;
 
             // Determine if this is an enhanced payload or simple string
             if (audioPayload is string simpleBase64)
@@ -287,7 +318,6 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
                             }
                         }
                         
-                        isEnhancedPayload = true;
                         _logger.LogInformation("🎵 Enhanced JSON audio chunk received for {ConnectionId}, ChunkId: {ChunkId}, Session: {SessionId}", 
                             Context.ConnectionId, chunkId, sessionId);
                     }
@@ -314,7 +344,6 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
                     var metadata = enhancedPayload?.metadata;
                     sessionId = metadata?.sessionId?.ToString() ?? "unknown";
                     chunkId = metadata?.chunkId?.ToString() ?? "unknown";
-                    isEnhancedPayload = true;
                     
                     _logger.LogInformation("🎵 Dynamic enhanced audio chunk received for {ConnectionId}, ChunkId: {ChunkId}, Session: {SessionId}", 
                         Context.ConnectionId, chunkId, sessionId);
@@ -470,6 +499,24 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
     //     }
     // }
 
+    /// <summary>
+    /// Called when STT times out and returns whatever transcript it has
+    /// This handles the same flow as CommitUtterance but from timeout
+    /// </summary>
+    public async Task HandleSttTimeout(dynamic timeoutResult)
+    {
+        try
+        {
+            _logger.LogInformation("⏰ STT timeout occurred for {ConnectionId}", Context.ConnectionId);
+            await HandleTranscriptionResult(timeoutResult, isFromCommit: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error handling STT timeout for {ConnectionId}", Context.ConnectionId);
+            await SendProcessingError("Timeout error - please try again");
+        }
+    }
+
     public async Task CommitUtterance()
     {
         try
@@ -482,15 +529,53 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
 
             _logger.LogInformation("✅ Committing utterance for {ConnectionId}", Context.ConnectionId);
             
-            var session = _sessionManager.GetSession(Context.ConnectionId);
-            if (session == null)
+            // ✅ STEP 1: Signal to STT processor to finalize gracefully
+            var session = await _sessionRepository.GetByConnectionIdAsync(Context.ConnectionId, CancellationToken.None);
+            if (session != null)
             {
-                await Clients.Caller.ReceiveError("Session not found in SessionManager");
-                return;
+                // Close audio channel to signal "no more audio coming"
+                session.AudioStreamChannel.Writer.Complete();
+                _logger.LogInformation("🔚 Audio channel completed for finalization for {ConnectionId}", Context.ConnectionId);
+                
+                // ✅ STEP 2: Wait for STT processing to complete and populate FinalTranscript
+                _logger.LogInformation("⏰ Waiting for STT processing to complete for {ConnectionId}...", Context.ConnectionId);
+                
+                var maxWaitTime = TimeSpan.FromSeconds(8);
+                var checkInterval = TimeSpan.FromMilliseconds(500);
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                
+                // Poll until we have a transcript or timeout
+                while (stopwatch.Elapsed < maxWaitTime)
+                {
+                    await Task.Delay(checkInterval);
+                    
+                    // Refresh session to check if FinalTranscript has been populated
+                    var refreshedSession = await _sessionRepository.GetByConnectionIdAsync(Context.ConnectionId, CancellationToken.None);
+                    if (refreshedSession != null && !string.IsNullOrWhiteSpace(refreshedSession.FinalTranscript))
+                    {
+                        _logger.LogInformation("✅ STT processing completed with transcript: \"{Transcript}\" (took {ElapsedMs}ms)", 
+                            refreshedSession.FinalTranscript.Trim(), stopwatch.ElapsedMilliseconds);
+                        break;
+                    }
+                    
+                    if (stopwatch.Elapsed.TotalSeconds % 2 == 0) // Log every 2 seconds
+                    {
+                        _logger.LogInformation("⏰ Still waiting for STT processing... ({ElapsedMs}ms elapsed)", stopwatch.ElapsedMilliseconds);
+                    }
+                }
+                
+                if (stopwatch.Elapsed >= maxWaitTime)
+                {
+                    _logger.LogWarning("⚠️ STT processing timeout after {TimeoutMs}ms for {ConnectionId}", maxWaitTime.TotalMilliseconds, Context.ConnectionId);
+                }
+                
+                _logger.LogInformation("⏰ Finalization delay completed, proceeding with commit for {ConnectionId}", Context.ConnectionId);
             }
+            
+            // ✅ STEP 3: Now commit with the final transcript
+            var result = await _mediator.Send(new CommitUtteranceCommand(Context.ConnectionId));
 
-            string language = session.GetEffectiveLanguage();
-            await _orchestrator.CommitAndProcessAsync(Context.ConnectionId, language);
+            await HandleTranscriptionResult(result, isFromCommit: true);
         }
         catch (ObjectDisposedException)
         {
@@ -499,14 +584,114 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Error in CommitUtterance for {ConnectionId}", Context.ConnectionId);
-            try
+            await SendProcessingError("System error occurred - please try again");
+        }
+    }
+
+    /// <summary>
+    /// Handle transcription results from either CommitUtterance or STT timeout
+    /// </summary>
+    private async Task HandleTranscriptionResult(dynamic result, bool isFromCommit = false)
+    {
+        try
+        {
+            bool success = result.Success;
+            string transcript = result.Transcript ?? "";
+            string errorMessage = result.ErrorMessage ?? "";
+
+            if (!success)
             {
-                await Clients.Caller.ReceiveError($"Processing failed: {ex.Message}");
+                _logger.LogWarning("Transcription failed: {Message} for {ConnectionId}", errorMessage, Context.ConnectionId);
+                await SendAudioReceptionError("Could not process audio - please speak again");
+                return;
             }
-            catch (ObjectDisposedException)
+
+            if (string.IsNullOrWhiteSpace(transcript))
             {
-                _logger.LogWarning("Hub disposed while sending error for {ConnectionId}", Context.ConnectionId);
+                _logger.LogInformation("Empty transcript received for {ConnectionId}", Context.ConnectionId);
+                await SendAudioReceptionError("No speech detected - please speak again");
+                return;
             }
+
+            // 🎯 SUCCESS: Audio received and transcribed!
+            _logger.LogInformation("✅ Audio received and transcribed: {Transcript} for {ConnectionId}", 
+                transcript, Context.ConnectionId);
+            
+            // 📡 CRITICAL: Send audio reception acknowledgment
+            // This tells frontend: "Stop recording, we got your speech"
+            await SendAudioReceptionAck("Audio received - generating response...");
+            
+            // ✅ Processing continues via Events (GenAI, TTS)
+            // Event handlers will send status updates and final completion
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error handling transcription result for {ConnectionId}", Context.ConnectionId);
+            await SendProcessingError("Processing error - please try again");
+        }
+    }
+
+    /// <summary>
+    /// Send audio reception acknowledgment - stops recording, confirms processing started
+    /// </summary>
+    private async Task SendAudioReceptionAck(string message)
+    {
+        try
+        {
+            await Clients.Caller.ReceiveAudioReceptionAck(message);
+            _logger.LogInformation("📤 Sent audio reception ACK to {ConnectionId}: {Message}", Context.ConnectionId, message);
+        }
+        catch (ObjectDisposedException)
+        {
+            _logger.LogWarning("Hub disposed while sending audio reception ACK for {ConnectionId}", Context.ConnectionId);
+        }
+    }
+
+    /// <summary>
+    /// Send audio reception error - stops recording, asks to try again
+    /// </summary>
+    private async Task SendAudioReceptionError(string errorMessage)
+    {
+        try
+        {
+            await Clients.Caller.ReceiveAudioReceptionError(errorMessage);
+            _logger.LogInformation("📤 Sent audio reception ERROR to {ConnectionId}: {Message}", Context.ConnectionId, errorMessage);
+        }
+        catch (ObjectDisposedException)
+        {
+            _logger.LogWarning("Hub disposed while sending audio reception error for {ConnectionId}", Context.ConnectionId);
+        }
+    }
+
+    /// <summary>
+    /// Send processing status update
+    /// </summary>
+    public async Task SendProcessingStatus(string status)
+    {
+        try
+        {
+            await Clients.Caller.ReceiveProcessingStatus(status);
+            _logger.LogInformation("📤 Sent processing status to {ConnectionId}: {Status}", Context.ConnectionId, status);
+        }
+        catch (ObjectDisposedException)
+        {
+            _logger.LogWarning("Hub disposed while sending processing status for {ConnectionId}", Context.ConnectionId);
+        }
+    }
+
+    /// <summary>
+    /// Send processing error - shows error but keeps session active
+    /// </summary>
+    public async Task SendProcessingError(string errorMessage)
+    {
+        try
+        {
+            await Clients.Caller.ReceiveProcessingError(errorMessage);
+            _logger.LogInformation("📤 Sent processing error to {ConnectionId}: {Message}", Context.ConnectionId, errorMessage);
+        }
+        catch (ObjectDisposedException)
+        {
+            _logger.LogWarning("Hub disposed while sending processing error for {ConnectionId}", Context.ConnectionId);
         }
     }
 
@@ -604,7 +789,10 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
             // - Google STT: Use WebM directly (TranscribeWebMStreamAsync)
             // - Azure STT: Convert to PCM if needed
             Console.WriteLine($"📤 DIRECT WEBM: Sending {webmBytes.Length} bytes directly to orchestrator");
-            await _orchestrator.ProcessAudioChunkAsync(Context.ConnectionId, base64AudioData);
+            
+            // ✅ CLEAN ARCHITECTURE: Use Command
+            await _mediator.Send(new ProcessAudioChunkCommand(Context.ConnectionId, base64AudioData));
+            
             Console.WriteLine($"✅ DIRECT WEBM: Successfully sent to orchestrator for {Context.ConnectionId}");
         }
         catch (Exception ex)
@@ -680,5 +868,92 @@ public class AudioConversationHub : Hub<IAudioClient>, IDisposable
         }
         
         throw new InvalidOperationException("Cannot extract PCM data from WAV file");
+    }
+
+    // ✅ NEW: Streaming translation methods
+    /// <summary>
+    /// Start streaming translation process
+    /// </summary>
+    public async Task StartStreamingTranslation(string transcriptionText)
+    {
+        try
+        {
+            var connectionId = Context.ConnectionId;
+            _logger.LogInformation("🔄 StartStreamingTranslation called for {ConnectionId}", connectionId);
+
+            // Get session
+            var session = await _sessionRepository.GetByConnectionIdAsync(connectionId, CancellationToken.None);
+            if (session == null)
+            {
+                await Clients.Caller.ReceiveError("Session not found");
+                return;
+            }
+
+            // TODO: Implement streaming translation via MediatR command instead of legacy orchestrator
+            // This functionality should be handled via the Domain/Application layer
+            _logger.LogInformation("✅ StartStreamingTranslation called - delegating to Domain handlers");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error in StartStreamingTranslation for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError($"Streaming translation failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Cancel active streaming operation
+    /// </summary>
+    public async Task CancelStreaming()
+    {
+        try
+        {
+            var connectionId = Context.ConnectionId;
+            _logger.LogInformation("🛑 CancelStreaming called for {ConnectionId}", connectionId);
+
+            // Get session to find session ID
+            var session = await _sessionRepository.GetByConnectionIdAsync(connectionId, CancellationToken.None);
+            if (session != null)
+            {
+                // Cancel via streaming orchestrator (will be implemented)
+                // await _streamingOrchestrator.CancelStreamingAsync(session.SessionId);
+            }
+
+            await Clients.Caller.ReceiveOperationCancelled();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error in CancelStreaming for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError($"Cancel operation failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Confirm cycle completion and readiness for next audio
+    /// </summary>
+    public async Task ConfirmReadyForNext()
+    {
+        try
+        {
+            var connectionId = Context.ConnectionId;
+            _logger.LogInformation("✅ ConfirmReadyForNext called for {ConnectionId}", connectionId);
+
+            // Get session
+            var session = await _sessionRepository.GetByConnectionIdAsync(connectionId, CancellationToken.None);
+            if (session == null)
+            {
+                await Clients.Caller.ReceiveError("Session not found");
+                return;
+            }
+
+            // Reset session state for next audio cycle
+            // This could involve clearing buffers, resetting state, etc.
+            
+            await Clients.Caller.ReceiveCycleCompletion(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error in ConfirmReadyForNext for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError($"Ready confirmation failed: {ex.Message}");
+        }
     }
 }

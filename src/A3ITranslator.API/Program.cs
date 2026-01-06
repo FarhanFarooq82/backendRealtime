@@ -3,11 +3,15 @@ using Microsoft.Extensions.Options; // ✅ Add this for IOptions
 using A3ITranslator.API.Hubs;
 using A3ITranslator.API.Services;
 using A3ITranslator.Application.Services;
+using A3ITranslator.Application.Domain.Interfaces; // ✅ Add for ISessionRepository
+using A3ITranslator.Infrastructure.Persistence.Repositories; // ✅ Add for InMemorySessionRepository
 using A3ITranslator.Infrastructure.Services.Audio;
-using A3ITranslator.Application.Orchestration;
 using A3ITranslator.Infrastructure.Services;
 using A3ITranslator.Infrastructure.Services.Azure;
+using A3ITranslator.Infrastructure.Services.Translation; // 🆕 Add for translation services
 using A3ITranslator.Infrastructure.Configuration; // ✅ Add this for ServiceOptions
+using A3ITranslator.Application;
+using A3ITranslator.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +22,10 @@ Console.WriteLine($"🔧 Configuration sources: {string.Join(", ", builder.Confi
 // ✅ CRITICAL: Configure ServiceOptions binding
 builder.Services.Configure<ServiceOptions>(
     builder.Configuration.GetSection(ServiceOptions.SectionName));
+
+// ✅ Clean Architecture Service Registrations
+builder.Services.AddApplicationServices();
+builder.Services.AddInfrastructureServices(builder.Configuration);
 
 // Add API Controllers
 builder.Services.AddControllers();
@@ -36,9 +44,8 @@ builder.Services.AddSignalR(options =>
     options.HandshakeTimeout = TimeSpan.FromSeconds(30);
 });
 
-// ✅ Fixed Service Registration - Managers MUST be Singletons to hold state across Hub calls
-builder.Services.AddSingleton<ISessionManager, SessionManager>();
-builder.Services.AddSingleton<IConnectionManager, ConnectionManager>();
+// 🔥 CRITICAL FIX: Register Domain Repository for Clean Architecture
+builder.Services.AddSingleton<ISessionRepository, InMemorySessionRepository>();
 
 // 🔥 CRITICAL FIX: STT services must be SINGLETONS to maintain chunk accumulation state
 // Scoped services get recreated for each request, losing accumulated audio buffers
@@ -49,17 +56,20 @@ builder.Services.AddSingleton<IStreamingSTTService, STTOrchestrator>(); // ✅ S
 // 🎵 Audio Test Collector - DEBUG ONLY service for testing audio reception
 builder.Services.AddSingleton<AudioTestCollector>(); // ✅ SINGLETON: Accumulates audio chunks for testing
 
-// ✅ Audio Processing Services - Orchestrators need to be singletons for state consistency
-builder.Services.AddSingleton<IRealtimeAudioOrchestrator, RealtimeAudioOrchestrator>();
+// ✅ Audio Processing Services - STT processor and language services
 builder.Services.AddSingleton<ISttProcessor, SttProcessor>();
 
 // 🔧 Non-stateful services upgraded to Singleton for Orchestrator compatibility
 builder.Services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
 builder.Services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
-builder.Services.AddSingleton<IRealtimeNotificationService, RealtimeNotificationService>();
+builder.Services.AddSingleton<IRealtimeNotificationService, SignalRNotificationService>();
 builder.Services.AddSingleton<IGenAIService, AzureGenAIService>();
 builder.Services.AddSingleton<IStreamingTTSService, StreamingTTSService>();
 builder.Services.AddSingleton<IFactExtractionService, FactExtractionService>();
+
+// 🆕 Translation Services
+builder.Services.AddSingleton<ITranslationPromptService, TranslationPromptService>();
+builder.Services.AddSingleton<ITranslationOrchestrator, TranslationOrchestrator>();
 
 // TODO: Add these when they exist
 // builder.Services.AddScoped<IStreamingTranslationService, StreamingTranslationService>();

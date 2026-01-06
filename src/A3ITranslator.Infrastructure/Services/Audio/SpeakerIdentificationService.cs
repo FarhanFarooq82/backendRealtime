@@ -1,5 +1,6 @@
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.Models;
+using A3ITranslator.Application.Domain.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
@@ -93,7 +94,12 @@ public class SpeakerIdentificationService : ISpeakerIdentificationService
     {
         try
         {
-            return session.Speakers.FindMatchingSpeaker(characteristics, 0.8f);
+            // TODO: Fix type mismatch between VoiceCharacteristics in Models and Domain.ValueObjects
+            // return session.FindMatchingSpeaker(characteristics, 0.8f);
+            
+            // Temporary placeholder until types are unified
+            _logger.LogWarning("⚠️ Speaker matching temporarily disabled due to type mismatch - needs architectural fix");
+            return null;
         }
         catch (Exception ex)
         {

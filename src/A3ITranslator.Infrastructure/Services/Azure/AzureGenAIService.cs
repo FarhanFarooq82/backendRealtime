@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.AI.OpenAI;
 using Azure;
+using System.Runtime.CompilerServices;
 
 namespace A3ITranslator.Infrastructure.Services.Azure;
 
@@ -105,6 +106,77 @@ public class AzureGenAIService : IGenAIService
         {
             _logger.LogError(ex, "Error calling Azure OpenAI service: {Message}", ex.Message);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Stream response tokens from Azure OpenAI using Server-Sent Events (SSE)
+    /// </summary>
+    public async IAsyncEnumerable<string> StreamResponseAsync(
+        string systemPrompt, 
+        string userPrompt, 
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (_openAIClient == null)
+        {
+            _logger.LogError("Azure OpenAI client not initialized - check configuration");
+            throw new InvalidOperationException("Azure OpenAI service not properly configured");
+        }
+
+        if (string.IsNullOrEmpty(_options.Azure?.OpenAIDeploymentName))
+        {
+            _logger.LogError("Azure OpenAI deployment name not configured");
+            throw new InvalidOperationException("Azure OpenAI deployment name not configured");
+        }
+
+        _logger.LogDebug("Starting Azure OpenAI streaming chat completions for deployment: {DeploymentName}", 
+            _options.Azure.OpenAIDeploymentName);
+
+        var chatCompletionsOptions = new ChatCompletionsOptions()
+        {
+            DeploymentName = _options.Azure.OpenAIDeploymentName,
+            Messages =
+            {
+                new ChatRequestSystemMessage(systemPrompt),
+                new ChatRequestUserMessage(userPrompt)
+            },
+            Temperature = 0.3f,
+            MaxTokens = 2000,
+            NucleusSamplingFactor = 0.9f
+        };
+
+        StreamingResponse<StreamingChatCompletionsUpdate>? streamingResponse = null;
+
+        try
+        {
+            // ✅ Get streaming response using Azure OpenAI SDK
+            streamingResponse = await _openAIClient.GetChatCompletionsStreamingAsync(chatCompletionsOptions, cancellationToken);
+
+            // ✅ Enumerate over streaming updates according to Azure SDK
+            await foreach (var completionUpdate in streamingResponse.EnumerateValues())
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    yield break;
+
+                // ✅ Access content delta according to Azure OpenAI SDK structure
+                if (!string.IsNullOrEmpty(completionUpdate.ContentUpdate))
+                {
+                    _logger.LogTrace("Streaming token: {Token}", completionUpdate.ContentUpdate);
+                    yield return completionUpdate.ContentUpdate;
+                }
+
+                // ✅ Check for finish reason
+                if (completionUpdate.FinishReason.HasValue)
+                {
+                    _logger.LogDebug("Azure OpenAI streaming completed with reason: {Reason}", completionUpdate.FinishReason.Value);
+                    yield break;
+                }
+            }
+        }
+        finally
+        {
+            // ✅ Ensure proper disposal of streaming response
+            streamingResponse?.Dispose();
         }
     }
 }

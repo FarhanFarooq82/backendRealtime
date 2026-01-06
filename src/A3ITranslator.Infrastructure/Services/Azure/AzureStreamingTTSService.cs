@@ -33,28 +33,70 @@ public class AzureStreamingTTSService : IStreamingTTSService
             config.SpeechSynthesisVoiceName = voiceName;
         }
 
-        // Use PullStream to get bytes directly
-        using var synthesizer = new SpeechSynthesizer(config, null); // null output means memory
+        // ✅ Set output format for streaming
+        config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3);
 
-        // We use SynthesizeSpeechToStreamAsync for non-streaming text input (since we send sentence by sentence)
-        // Optimization: For long text we could use SpeakTextAsync with events, but for sentence-level, standard synthesis is fine.
-        // However, to be "Streaming" to the client, we want to yield bytes as Azure generates them.
-        
-        using var result = await synthesizer.StartSpeakingTextAsync(text);
-        
-        // Read the stream from Azure
-        using var audioStream = AudioDataStream.FromResult(result);
-        
-        var buffer = new byte[16000]; // 16kb buffer
-        uint bytesRead;
-        
-        while ((bytesRead = audioStream.ReadData(buffer)) > 0)
+        var audioChunks = new List<byte[]>();
+        SpeechSynthesisResult? result = null;
+
+        try
         {
-            // Create a copy of the chunk to yield
-            var chunk = new byte[bytesRead];
-            Array.Copy(buffer, chunk, bytesRead);
+            using var synthesizer = new SpeechSynthesizer(config, null); // null output for in-memory
             
-            yield return new TTSChunk { AudioData = chunk };
+            _logger.LogDebug("Starting Azure TTS synthesis for text: {Text}", text.Substring(0, Math.Min(50, text.Length)));
+
+            // ✅ Subscribe to synthesizing events for streaming
+            synthesizer.Synthesizing += (sender, e) =>
+            {
+                if (e.Result.AudioData?.Length > 0)
+                {
+                    var chunk = new byte[e.Result.AudioData.Length];
+                    e.Result.AudioData.CopyTo(chunk, 0);
+                    audioChunks.Add(chunk);
+                    
+                    _logger.LogTrace("Azure TTS audio chunk received: {Size} bytes", chunk.Length);
+                }
+            };
+
+            // ✅ Start synthesis with result awaiting
+            result = await synthesizer.SpeakTextAsync(text);
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during Azure TTS synthesis: {Message}", ex.Message);
+            yield break; // Exit gracefully on error
+        }
+
+        // ✅ Process results outside try-catch to allow yielding
+        if (result?.Reason == ResultReason.SynthesizingAudioCompleted)
+        {
+            _logger.LogDebug("Azure TTS synthesis completed successfully, yielding {Count} chunks", audioChunks.Count);
+
+            // ✅ Yield accumulated audio chunks
+            for (int i = 0; i < audioChunks.Count; i++)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    yield break;
+
+                yield return new TTSChunk 
+                { 
+                    AudioData = audioChunks[i],
+                    BoundaryType = i == audioChunks.Count - 1 ? "end" : "chunk",
+                    IsFirstChunk = i == 0,
+                    ChunkIndex = i,
+                    TotalChunks = audioChunks.Count,
+                    AssociatedText = text
+                };
+            }
+        }
+        else if (result?.Reason == ResultReason.Canceled)
+        {
+            var cancellationDetails = SpeechSynthesisCancellationDetails.FromResult(result);
+            _logger.LogError("Azure TTS synthesis cancelled: {Reason}, {ErrorDetails}", 
+                cancellationDetails.Reason, cancellationDetails.ErrorDetails);
+        }
+
+        // ✅ Clean up result
+        result?.Dispose();
     }
 }

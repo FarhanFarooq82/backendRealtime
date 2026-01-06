@@ -24,9 +24,19 @@ public class StreamingTTSService : IStreamingTTSService
         string voiceName,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(text)) yield break;
+        if (string.IsNullOrWhiteSpace(text)) 
+        {
+            _logger.LogWarning("🔊 Azure TTS: Empty text provided for synthesis");
+            yield break;
+        }
+
+        _logger.LogDebug("🔊 Azure TTS: Starting synthesis for text: {Text} (Voice: {Voice})", 
+            text.Substring(0, Math.Min(text.Length, 50)), voiceName);
 
         var config = SpeechConfig.FromSubscription(_options.Azure.SpeechKey, _options.Azure.SpeechRegion);
+        
+        // ✅ Fix: Use proper output format for streaming to web browsers
+        config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3);
         config.SpeechSynthesisLanguage = language;
         if (!string.IsNullOrEmpty(voiceName))
         {
@@ -35,22 +45,72 @@ public class StreamingTTSService : IStreamingTTSService
 
         using var synthesizer = new SpeechSynthesizer(config, null);
 
-        // Standard synthesis for now; could be optimized for true streaming if input was a stream, 
-        // but input is a text sentence.
-        using var result = await synthesizer.StartSpeakingTextAsync(text);
-        using var audioStream = AudioDataStream.FromResult(result);
+        _logger.LogDebug("🔊 Azure TTS: Config created, starting synthesis...");
 
-        var buffer = new byte[16000];
-        uint bytesRead;
+        // ✅ Fix: Use SpeakTextAsync for data retrieval, not StartSpeakingTextAsync
+        using var result = await synthesizer.SpeakTextAsync(text);
 
-        while ((bytesRead = audioStream.ReadData(buffer)) > 0)
+        if (result.Reason == ResultReason.SynthesizingAudioCompleted)
         {
-            if (cancellationToken.IsCancellationRequested) break;
+            _logger.LogDebug("🔊 Azure TTS: Synthesis completed, audio data length: {Length}", 
+                result.AudioData?.Length ?? 0);
 
-            var chunk = new byte[bytesRead];
-            Array.Copy(buffer, chunk, bytesRead);
+            // ✅ Fix: Use result.AudioData directly for streaming
+            if (result.AudioData != null && result.AudioData.Length > 0)
+            {
+                const int chunkSize = 4096; // 4KB chunks for smooth streaming
+                int totalChunks = (int)Math.Ceiling((double)result.AudioData.Length / chunkSize);
+                
+                _logger.LogDebug("🔊 Azure TTS: Streaming {TotalChunks} chunks", totalChunks);
+
+                for (int i = 0; i < totalChunks; i++)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        _logger.LogDebug("🔊 Azure TTS: Streaming cancelled at chunk {ChunkIndex}", i);
+                        yield break;
+                    }
+
+                    int startIndex = i * chunkSize;
+                    int length = Math.Min(chunkSize, result.AudioData.Length - startIndex);
+                    
+                    var chunk = new byte[length];
+                    Array.Copy(result.AudioData, startIndex, chunk, 0, length);
+
+                    _logger.LogTrace("🔊 Azure TTS: Yielding chunk {ChunkIndex}/{TotalChunks}, size: {Size}", 
+                        i + 1, totalChunks, chunk.Length);
+
+                    yield return new TTSChunk 
+                    { 
+                        AudioData = chunk,
+                        AssociatedText = text,
+                        BoundaryType = (i == totalChunks - 1) ? "end" : "chunk",
+                        IsFirstChunk = (i == 0),
+                        ChunkIndex = i,
+                        TotalChunks = totalChunks
+                    };
+
+                    // Small delay for natural streaming feel
+                    await Task.Delay(10, cancellationToken);
+                }
+
+                _logger.LogDebug("✅ Azure TTS: Streaming completed successfully");
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Azure TTS: Synthesis completed but no audio data received");
+            }
+        }
+        else
+        {
+            _logger.LogError("❌ Azure TTS: Synthesis failed. Reason: {Reason}", result.Reason);
             
-            yield return new TTSChunk { AudioData = chunk };
+            if (result.Reason == ResultReason.Canceled)
+            {
+                var cancellation = SpeechSynthesisCancellationDetails.FromResult(result);
+                _logger.LogError("❌ Azure TTS: Cancellation details - Reason: {Reason}, ErrorCode: {ErrorCode}, ErrorDetails: {ErrorDetails}",
+                    cancellation.Reason, cancellation.ErrorCode, cancellation.ErrorDetails);
+            }
         }
     }
 }

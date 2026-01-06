@@ -97,6 +97,42 @@ public class AzureStreamingSTTService : IStreamingSTTService
         _logger = logger;
     }
 
+    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+        ChannelReader<byte[]> audioStream,
+        string[] candidateLanguages,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("🌍 Azure STT Auto-Detection with candidates: [{Languages}]", string.Join(", ", candidateLanguages));
+        Console.WriteLine($"🌍 AZURE STT: Auto-Detection starting with {candidateLanguages.Length} candidate languages");
+        
+        // For now, fallback to single language mode with first candidate
+        // Azure auto-detection would require more complex implementation
+        var primaryLanguage = candidateLanguages.FirstOrDefault() ?? "en-US";
+        
+        Console.WriteLine($"🌍 AZURE STT: Using {primaryLanguage} as fallback (full auto-detection not implemented)");
+        _logger.LogWarning("Azure auto-detection not fully implemented, using {Language} as fallback", primaryLanguage);
+        
+        await foreach (var result in TranscribeStreamAsync(audioStream, primaryLanguage, cancellationToken))
+        {
+            yield return result;
+        }
+    }
+
+    /// <summary>
+    /// [Obsolete] Use ProcessAutoLanguageDetectionAsync instead
+    /// </summary>
+    [Obsolete("Use ProcessAutoLanguageDetectionAsync instead. This method will be removed in a future version.", false)]
+    public async IAsyncEnumerable<TranscriptionResult> TranscribeStreamWithAutoDetectionAsync(
+        ChannelReader<byte[]> audioStream,
+        string[] candidateLanguages,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var result in ProcessAutoLanguageDetectionAsync(audioStream, candidateLanguages, cancellationToken))
+        {
+            yield return result;
+        }
+    }
+
     public async IAsyncEnumerable<TranscriptionResult> TranscribeStreamAsync(
         ChannelReader<byte[]> audioStream, 
         string language,

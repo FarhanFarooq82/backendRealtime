@@ -1,4 +1,5 @@
 using A3ITranslator.Application.Models;
+using A3ITranslator.Application.Domain.Entities;
 
 namespace A3ITranslator.Application.Services;
 

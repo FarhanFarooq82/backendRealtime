@@ -79,6 +79,7 @@ public interface ITTSService
 /// Supports Azure Copilot, Gemini, OpenAI GPT, etc.
 /// <summary>
 /// GenAI service interface for system/user prompt processing
+/// Supports both traditional and streaming responses
 /// </summary>
 public interface IGenAIService
 {
@@ -91,6 +92,11 @@ public interface IGenAIService
     /// Generate response from system and user prompts
     /// </summary>
     Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt);
+    
+    /// <summary>
+    /// Stream response tokens from system and user prompts
+    /// </summary>
+    IAsyncEnumerable<string> StreamResponseAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Check if the service is healthy and available

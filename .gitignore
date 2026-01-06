@@ -324,6 +324,15 @@ ASALocalRun/
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
 
+# Configuration files with secrets/local settings
+appsettings.Development.json
+appsettings.Local.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.*.local.json
+secrets.json
+*.secrets.json
+
 # macOS
 .DS_Store
 .DS_Store?

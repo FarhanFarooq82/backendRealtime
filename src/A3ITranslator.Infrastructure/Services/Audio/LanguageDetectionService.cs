@@ -1,11 +1,12 @@
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.Models;
+using DomainSession = A3ITranslator.Application.Domain.Entities.ConversationSession;
 using Microsoft.Extensions.Logging;
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
 
 /// <summary>
-/// Speaker-based language detection service (Fix Issue #1)
+/// Speaker-based language detection service (Pure Domain Architecture)
 /// Single Responsibility: Language detection per speaker
 /// </summary>
 public class LanguageDetectionService : ILanguageDetectionService
@@ -24,7 +25,7 @@ public class LanguageDetectionService : ILanguageDetectionService
     public async Task<LanguageDetectionResult> GetOrDetectLanguageAsync(
         string sessionId, 
         string[] candidateLanguages,
-        ConversationSession session)
+        DomainSession session)
     {
         try
         {
@@ -81,18 +82,18 @@ public class LanguageDetectionService : ILanguageDetectionService
         }
     }
 
-    public async Task<string?> GetSpeakerLanguageAsync(string speakerId, ConversationSession session)
+    public async Task<string?> GetSpeakerLanguageAsync(string speakerId, DomainSession session)
     {
-        var speaker = session.Speakers.GetSpeaker(speakerId);
-        return await Task.FromResult(speaker?.KnownLanguage);
+        var speaker = session.Speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
+        return await Task.FromResult(speaker?.Language);
     }
 
-    public async Task UpdateSpeakerLanguageAsync(string speakerId, string language, ConversationSession session)
+    public async Task UpdateSpeakerLanguageAsync(string speakerId, string language, DomainSession session)
     {
-        var speaker = session.Speakers.GetSpeaker(speakerId);
+        var speaker = session.Speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
         if (speaker != null)
         {
-            speaker.KnownLanguage = language;
+            speaker.Language = language;
             _logger.LogInformation("💾 Updated language {Language} for speaker {SpeakerId}", 
                 language, speakerId);
         }

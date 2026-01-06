@@ -3,7 +3,11 @@ namespace A3ITranslator.Application.Services;
 public class TTSChunk
 {
     public byte[] AudioData { get; set; } = Array.Empty<byte>();
-    public string BoundaryType { get; set; } = "sentence"; // sentence, punctuation, end
+    public string BoundaryType { get; set; } = "sentence"; // sentence, punctuation, end, chunk
+    public string AssociatedText { get; set; } = string.Empty;
+    public bool IsFirstChunk { get; set; }
+    public int ChunkIndex { get; set; }
+    public int TotalChunks { get; set; }
 }
 
 public interface IStreamingTTSService
