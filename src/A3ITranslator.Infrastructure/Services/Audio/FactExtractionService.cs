@@ -1,8 +1,8 @@
 using A3ITranslator.Application.Models;
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.DTOs.Translation;
+using A3ITranslator.Application.Models.SpeakerProfiles;
 using Microsoft.Extensions.Logging;
-using SpeakerModel = A3ITranslator.Application.Models.Speaker; 
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
 
@@ -36,7 +36,7 @@ public class FactExtractionService : IFactExtractionService
              newFacts.Add(new SessionFact 
              {
                  SessionId = sessionId,
-                 FactContent = extractedFact.Text, // Map from ExtractedFact
+                 FactContent = extractedFact.Text, 
                  SpeakerId = speakerId,
                  SpeakerName = speakerName,
                  ExtractedAt = DateTime.UtcNow,
@@ -59,18 +59,18 @@ public class FactExtractionService : IFactExtractionService
         });
     }
 
-    public Task<SpeakerModel?> UpdateSpeakerFromFactsAsync(
+    public Task<SpeakerProfile?> UpdateSpeakerFromFactsAsync(
         string sessionId,
         string speakerId,
         bool genderMismatch,
         string detectedGender)
     {
-        return Task.FromResult<SpeakerModel?>(null);
+        return Task.FromResult<SpeakerProfile?>(null);
     }
 
-    public Task<List<SpeakerModel>> GetSessionSpeakersAsync(string sessionId)
+    public Task<List<SpeakerProfile>> GetSessionSpeakersAsync(string sessionId)
     {
-        return Task.FromResult(new List<SpeakerModel>());
+        return Task.FromResult(new List<SpeakerProfile>());
     }
 
     public Task<string> BuildFactContextAsync(string sessionId, int maxLength = 2000)

@@ -1,8 +1,7 @@
-using System.Threading.Channels;
 using MediatR;
-using A3ITranslator.Application.Domain.ValueObjects;
 using A3ITranslator.Application.Domain.Enums;
 using A3ITranslator.Application.Domain.Events;
+using A3ITranslator.Application.Models.SpeakerProfiles;
 using System.Linq;
 
 namespace A3ITranslator.Application.Domain.Entities;
@@ -11,8 +10,8 @@ public class ConversationSession
 {
     private readonly object _lock = new();
 
-    public string SessionId { get; private set; }
-    public string ConnectionId { get; private set; }
+    public string SessionId { get; private set; } = string.Empty;
+    public string ConnectionId { get; private set; } = string.Empty;
     public DateTime StartTime { get; private set; } = DateTime.UtcNow;
     public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
 
@@ -21,17 +20,12 @@ public class ConversationSession
     public string? SecondaryLanguage { get; set; }
     public bool IsLanguageConfirmed { get; set; }
 
-    // Audio Streaming (Transient)
-    public Channel<byte[]> AudioStreamChannel { get; } = Channel.CreateUnbounded<byte[]>();
-    public List<byte> AudioBuffer { get; } = new();
-
     // Speaker Management
-    private readonly List<Speaker> _speakers = new();
-    public IReadOnlyCollection<Speaker> Speakers => _speakers.AsReadOnly();
+    private readonly List<SpeakerProfile> _speakers = new();
+    public IReadOnlyCollection<SpeakerProfile> Speakers => _speakers.AsReadOnly();
     public string? CurrentSpeakerId { get; set; }
 
     // Conversation History
-    // Conversation History (Thread-Safe)
     private readonly List<ConversationTurn> _conversationHistory = new();
     public IReadOnlyList<ConversationTurn> ConversationHistory 
     {
@@ -48,19 +42,13 @@ public class ConversationSession
         }
     }
 
-    // Session Statistics
     public SessionStatistics Statistics { get; } = new();
-
-    // Session State
     public SessionStatus Status { get; private set; } = SessionStatus.Active;
     public Dictionary<string, object> Metadata { get; } = new();
 
-    // STT Processing State (Transient)
-    public bool SttProcessorRunning { get; set; } = false;
-
     private ConversationSession() { }
 
-    public static ConversationSession Create(string connectionId, string sessionId = null)
+    public static ConversationSession Create(string connectionId, string? sessionId = null)
     {
         return new ConversationSession
         {
@@ -91,12 +79,12 @@ public class ConversationSession
     {
         if (IsLanguageConfirmed) return PrimaryLanguage;
 
-        // Get language from current speaker if available
         if (CurrentSpeakerId != null)
         {
             var speaker = GetSpeaker(CurrentSpeakerId);
-            if (!string.IsNullOrEmpty(speaker?.Language))
-                return speaker.Language;
+            var lang = speaker?.GetDominantLanguage();
+            if (!string.IsNullOrEmpty(lang))
+                return lang;
         }
 
         return PrimaryLanguage;
@@ -105,9 +93,7 @@ public class ConversationSession
     // --- Domain Events ---
     private readonly List<INotification> _domainEvents = new();
     public IReadOnlyCollection<INotification> DomainEvents => _domainEvents.AsReadOnly();
-
     public void ClearDomainEvents() => _domainEvents.Clear();
-
     private void AddDomainEvent(INotification eventItem) => _domainEvents.Add(eventItem);
 
     // --- Business Logic ---
@@ -116,11 +102,6 @@ public class ConversationSession
     {
         lock(_lock)
         {
-            if (string.IsNullOrWhiteSpace(FinalTranscript))
-            {
-                // Logic for empty transcript...
-            }
-    
             string speakerName = "Unknown";
             if (CurrentSpeakerId != null)
             {
@@ -136,28 +117,18 @@ public class ConversationSession
             );
     
             AddConversationTurn(turn);
-            
-            // Capture transcript before clearing
             string committedTranscript = FinalTranscript;
-            
-            // Clear transcript buffer
             FinalTranscript = string.Empty;
             
-            // Clear Audio Buffer (Important for memory management)
-            AudioBuffer.Clear();
-    
-            // Emit Event
             AddDomainEvent(new Events.UtteranceCommitted(this, turn, committedTranscript));
     
             return turn;
         }
     }
 
-    // --- Speaker Management Logic (Migrated from SpeakerRegistry) ---
+    public SpeakerProfile? GetSpeaker(string speakerId) => _speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
 
-    public Speaker? GetSpeaker(string speakerId) => _speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
-
-    public void AddSpeaker(Speaker speaker)
+    public void AddSpeaker(SpeakerProfile speaker)
     {
         if (!_speakers.Any(s => s.SpeakerId == speaker.SpeakerId))
         {
@@ -165,28 +136,10 @@ public class ConversationSession
         }
     }
 
-    public string? FindMatchingSpeaker(VoiceCharacteristics characteristics, float threshold = 0.8f)
-    {
-        return _speakers
-            .Select(s => new { Speaker = s, Score = CalculateSimilarity(characteristics, s.VoiceCharacteristics) })
-            .Where(x => x.Score >= threshold)
-            .OrderByDescending(x => x.Score)
-            .FirstOrDefault()?.Speaker.SpeakerId;
-    }
-
-    private static float CalculateSimilarity(VoiceCharacteristics a, VoiceCharacteristics b)
-    {
-        if (a.Pitch == 0 && b.Pitch == 0) return 1.0f;
-        if (a.Pitch == 0 || b.Pitch == 0) return 0.0f;
-        return 1.0f - Math.Abs(a.Pitch - b.Pitch) / Math.Max(a.Pitch, b.Pitch);
-    }
-
-    // Session Lifecycle Methods
     public void EndSession(SessionStatus endStatus = SessionStatus.Completed)
     {
         Status = endStatus;
-        AudioStreamChannel.Writer.Complete();
-        UpdateActivity(); // Update last activity timestamp
+        UpdateActivity();
     }
 
     public void TerminateSession()
@@ -194,6 +147,7 @@ public class ConversationSession
         EndSession(SessionStatus.Terminated);
     }
 }
+
 
 public enum SessionStatus
 {

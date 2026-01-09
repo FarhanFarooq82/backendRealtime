@@ -1,6 +1,5 @@
 using A3ITranslator.Application.Services;
-using A3ITranslator.Application.Models;
-using A3ITranslator.Application.Domain.Entities;
+using A3ITranslator.Application.Models.SpeakerProfiles;
 using Microsoft.Extensions.Logging;
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
@@ -14,136 +13,31 @@ public class SpeakerIdentificationService : ISpeakerIdentificationService
         _logger = logger;
     }
 
-    // Add the missing method in your SpeakerIdentificationService:
     public async Task<string> IdentifySpeakerAsync(byte[] audioData, string sessionId)
-    {
-        // ✅ Delegate to existing method
-        return await IdentifyOrCreateSpeakerAsync(audioData, sessionId);
-    }
-    public async Task<string> IdentifyOrCreateSpeakerAsync(byte[] audioData, string sessionId)
     {
         try
         {
-            var characteristics = ExtractVoiceCharacteristics(audioData);
-            var speakerId = $"speaker_{sessionId[..8]}_{GetVoiceFingerprint(characteristics)}";
+            // Placeholder for real audio analysis (MFCC / Pitch extraction)
+            // For MVP: Generate a hash-based ID from the first 2 seconds of audio
+            var fingerprint = GenerateSimpleFingerprint(audioData);
+            var speakerId = $"speaker_{fingerprint}";
             
-            _logger.LogInformation("🎭 Identified speaker: {SpeakerId}", speakerId);
-            return speakerId;
+            _logger.LogInformation("🎭 Identified speaker fingerprint: {SpeakerId}", speakerId);
+            return await Task.FromResult(speakerId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Speaker identification failed");
-            return $"speaker_unknown_{sessionId[..8]}";
+            return "unknown";
         }
     }
 
-    public async Task<SpeakerProfile> AnalyzeSpeakerAsync(byte[] audioData, string transcript)
+    private string GenerateSimpleFingerprint(byte[] audioData)
     {
-        try
-        {
-            var characteristics = ExtractVoiceCharacteristics(audioData);
-            var confidence = CalculateAnalysisConfidence(audioData, transcript);
-
-            return new SpeakerProfile
-            {
-                SpeakerId = $"speaker_{GetVoiceFingerprint(characteristics)}",
-                VoiceCharacteristics = characteristics,
-                DisplayName = GenerateDisplayName(characteristics),
-                IdentificationConfidence = confidence,
-                FirstSeen = DateTime.UtcNow,
-                LastSeen = DateTime.UtcNow
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Speaker analysis failed");
-            return new SpeakerProfile
-            {
-                SpeakerId = "unknown",
-                DisplayName = "Unknown Speaker",
-                IdentificationConfidence = 0.0f
-            };
-        }
-    }
-
-    public VoiceCharacteristics ExtractVoiceCharacteristics(byte[] audioData)
-    {
-        try
-        {
-            var random = new Random(audioData.Length);
-            
-            return new VoiceCharacteristics(
-                Pitch: 100f + (float)(random.NextDouble() * 300),
-                Energy: (float)random.NextDouble(),
-                Gender: random.Next(2) == 0 ? "Male" : "Female",
-                Formants: new[] { 
-                    500f + (float)(random.NextDouble() * 500),   
-                    1500f + (float)(random.NextDouble() * 1000), 
-                    2500f + (float)(random.NextDouble() * 1500)  
-                }
-            );
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Voice characteristic extraction failed");
-            return new VoiceCharacteristics(150f, 0.5f, "Unknown", new[] { 500f, 1500f, 2500f });
-        }
-    }
-
-    public async Task<string?> FindMatchingSpeakerAsync(VoiceCharacteristics characteristics, ConversationSession session)
-    {
-        try
-        {
-            // TODO: Fix type mismatch between VoiceCharacteristics in Models and Domain.ValueObjects
-            // return session.FindMatchingSpeaker(characteristics, 0.8f);
-            
-            // Temporary placeholder until types are unified
-            _logger.LogWarning("⚠️ Speaker matching temporarily disabled due to type mismatch - needs architectural fix");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Speaker matching failed");
-            return null;
-        }
-    }
-
-    private string GetVoiceFingerprint(VoiceCharacteristics characteristics)
-    {
-        var hash = HashCode.Combine(
-            characteristics.Pitch, 
-            characteristics.Energy, 
-            characteristics.Gender,
-            characteristics.Formants.FirstOrDefault()
-        );
-        return Math.Abs(hash).ToString("x")[..6];
-    }
-
-    private float CalculateAnalysisConfidence(byte[] audioData, string transcript)
-    {
-        float confidence = 0.5f;
-        
-        if (audioData.Length > 8000) confidence += 0.2f;
-        if (!string.IsNullOrWhiteSpace(transcript) && transcript.Length > 10) confidence += 0.2f;
-        
-        confidence += (float)(Random.Shared.NextDouble() * 0.2 - 0.1);
-        return Math.Clamp(confidence, 0.0f, 1.0f);
-    }
-
-    private string GenerateDisplayName(VoiceCharacteristics characteristics)
-    {
-        var pitch = characteristics.Pitch;
-        var gender = characteristics.Gender;
-        
-        if (gender == "Male")
-        {
-            return pitch < 150 ? "Deep Voice Male" : "Male Speaker";
-        }
-        else if (gender == "Female")
-        {
-            return pitch > 200 ? "High Voice Female" : "Female Speaker";
-        }
-        
-        return $"Speaker ({pitch:F0}Hz)";
+        // Simple mock fingerprint based on audio length and some data bytes
+        // In real app, this would be MFCC vector or Pitch calculation
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(audioData);
+        return BitConverter.ToString(hash).Replace("-", "").ToLower()[..8];
     }
 }

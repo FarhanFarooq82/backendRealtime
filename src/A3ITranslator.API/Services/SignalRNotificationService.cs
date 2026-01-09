@@ -12,9 +12,9 @@ namespace A3ITranslator.API.Services;
 /// </summary>
 public class SignalRNotificationService : IRealtimeNotificationService
 {
-    private readonly IHubContext<AudioConversationHub, IAudioClient> _hubContext;
+    private readonly IHubContext<HubClient, IHubClient> _hubContext;
 
-    public SignalRNotificationService(IHubContext<AudioConversationHub, IAudioClient> hubContext)
+    public SignalRNotificationService(IHubContext<HubClient, IHubClient> hubContext)
     {
         _hubContext = hubContext;
     }
@@ -31,8 +31,11 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task NotifyAudioChunkAsync(string connectionId, string base64Audio) =>
         _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(base64Audio);
 
-    public Task NotifySpeakerUpdateAsync(string connectionId, SpeakerInfo speaker) =>
-        _hubContext.Clients.Client(connectionId).ReceiveSpeakerUpdate(speaker);
+    public Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal) =>
+        _hubContext.Clients.Client(connectionId).ReceiveTranslation(text, language, isFinal);
+
+    public Task NotifySpeakerUpdateAsync(string connectionId, SpeakerListUpdate speakerUpdate) =>
+        _hubContext.Clients.Client(connectionId).ReceiveSpeakerUpdate(speakerUpdate);
 
     public Task NotifyTransactionCompleteAsync(string connectionId) =>
         _hubContext.Clients.Client(connectionId).ReceiveTransactionComplete();

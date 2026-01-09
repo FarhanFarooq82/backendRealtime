@@ -17,4 +17,5 @@ public interface IStreamingTTSService
     /// Can be called multiple times for sequential sentences.
     /// </summary>
     IAsyncEnumerable<TTSChunk> SynthesizeStreamAsync(string text, string language, string voiceName, CancellationToken cancellationToken = default);
+    Task SynthesizeAndNotifyAsync(string connectionId, string text, string language, CancellationToken cancellationToken = default);
 }

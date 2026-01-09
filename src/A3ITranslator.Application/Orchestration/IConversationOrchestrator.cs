@@ -98,4 +98,26 @@ public interface IConversationOrchestrator
         string error,
         ConversationErrorSeverity severity,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enhanced pipeline entry point: Process raw audio chunk with speaker-aware pipeline
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    /// <param name="audioChunk">Raw audio chunk data</param>
+    Task ProcessAudioChunkAsync(string connectionId, byte[] audioChunk);
+
+    /// <summary>
+    /// Initialize connection pipeline with language candidates
+    /// Prepares STT, Speaker, and VAD processing for incoming audio
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    /// <param name="candidateLanguages">Language candidates for auto-detection</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task InitializeConnectionPipeline(string connectionId, string[] candidateLanguages, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Cleanup connection state and speaker profiles
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    Task CleanupConnection(string connectionId);
 }

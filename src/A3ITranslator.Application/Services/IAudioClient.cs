@@ -6,11 +6,12 @@ namespace A3ITranslator.Application.Interfaces; // Changed namespace
 /// <summary>
 /// Enhanced client interface with speaker support and state management
 /// </summary>
-public interface IAudioClient
+public interface IHubClient
 {
     Task ReceiveTranscription(string text, string language, bool isFinal);
     Task ReceiveAudioChunk(string base64Chunk);
-    Task ReceiveSpeakerUpdate(SpeakerInfo speaker);
+    Task ReceiveTranslation(string text, string language, bool isFinal);
+    Task ReceiveSpeakerUpdate(SpeakerListUpdate speakerUpdate);
     Task ReceiveTransactionComplete();
     Task ReceiveError(string message);
     

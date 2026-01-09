@@ -56,9 +56,6 @@ builder.Services.AddSingleton<IStreamingSTTService, STTOrchestrator>(); // ✅ S
 // 🎵 Audio Test Collector - DEBUG ONLY service for testing audio reception
 builder.Services.AddSingleton<AudioTestCollector>(); // ✅ SINGLETON: Accumulates audio chunks for testing
 
-// ✅ Audio Processing Services - STT processor and language services
-builder.Services.AddSingleton<ISttProcessor, SttProcessor>();
-
 // 🔧 Non-stateful services upgraded to Singleton for Orchestrator compatibility
 builder.Services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
 builder.Services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
@@ -105,7 +102,7 @@ if (app.Environment.IsDevelopment())
 
 // Add API routing
 app.MapControllers();
-app.MapHub<AudioConversationHub>("/audio-hub");
+app.MapHub<HubClient>("/audio-hub");
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "realtime-audio" }));
 

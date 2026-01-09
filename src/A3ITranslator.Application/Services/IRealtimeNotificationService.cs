@@ -14,7 +14,8 @@ public interface IRealtimeNotificationService
     Task NotifyErrorAsync(string connectionId, string message);
     Task NotifyLanguageDetectedAsync(string connectionId, string language);
     Task NotifyAudioChunkAsync(string connectionId, string base64Audio);
-    Task NotifySpeakerUpdateAsync(string connectionId, SpeakerInfo speaker);
+    Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal);
+    Task NotifySpeakerUpdateAsync(string connectionId, SpeakerListUpdate speakerUpdate);
     Task NotifyTransactionCompleteAsync(string connectionId);
 
     // ✅ NEW: Audio reception state management

@@ -11,11 +11,32 @@ public class StreamingTTSService : IStreamingTTSService
 {
     private readonly ServiceOptions _options;
     private readonly ILogger<StreamingTTSService> _logger;
+    private readonly IRealtimeNotificationService _notificationService;
 
-    public StreamingTTSService(IOptions<ServiceOptions> options, ILogger<StreamingTTSService> logger)
+    public StreamingTTSService(
+        IOptions<ServiceOptions> options, 
+        ILogger<StreamingTTSService> logger,
+        IRealtimeNotificationService notificationService)
     {
         _options = options.Value;
         _logger = logger;
+        _notificationService = notificationService;
+    }
+
+    public async Task SynthesizeAndNotifyAsync(string connectionId, string text, string language, CancellationToken cancellationToken = default)
+    {
+        await foreach (var chunk in SynthesizeStreamAsync(text, language, "", cancellationToken))
+        {
+            await _notificationService.SendTTSAudioSegmentAsync(connectionId, new Application.DTOs.Common.TTSAudioSegment
+            {
+                AudioData = Convert.ToBase64String(chunk.AudioData),
+                AssociatedText = chunk.AssociatedText,
+                IsFirstChunk = chunk.IsFirstChunk,
+                ChunkIndex = chunk.ChunkIndex,
+                TotalChunks = chunk.TotalChunks,
+                ConversationItemId = "tts-" + Guid.NewGuid().ToString()[..8]
+            });
+        }
     }
 
     public async IAsyncEnumerable<TTSChunk> SynthesizeStreamAsync(

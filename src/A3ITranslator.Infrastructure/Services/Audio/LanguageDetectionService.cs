@@ -85,7 +85,7 @@ public class LanguageDetectionService : ILanguageDetectionService
     public async Task<string?> GetSpeakerLanguageAsync(string speakerId, DomainSession session)
     {
         var speaker = session.Speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
-        return await Task.FromResult(speaker?.Language);
+        return await Task.FromResult(speaker?.GetDominantLanguage());
     }
 
     public async Task UpdateSpeakerLanguageAsync(string speakerId, string language, DomainSession session)
@@ -93,7 +93,7 @@ public class LanguageDetectionService : ILanguageDetectionService
         var speaker = session.Speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
         if (speaker != null)
         {
-            speaker.Language = language;
+            speaker.UpdateLanguageUsage(language, 1.0f); // Set as 100% usage for this update
             _logger.LogInformation("💾 Updated language {Language} for speaker {SpeakerId}", 
                 language, speakerId);
         }

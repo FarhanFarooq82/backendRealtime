@@ -112,37 +112,7 @@ public class AzureStreamingSTTService : IStreamingSTTService
         Console.WriteLine($"🌍 AZURE STT: Using {primaryLanguage} as fallback (full auto-detection not implemented)");
         _logger.LogWarning("Azure auto-detection not fully implemented, using {Language} as fallback", primaryLanguage);
         
-        await foreach (var result in TranscribeStreamAsync(audioStream, primaryLanguage, cancellationToken))
-        {
-            yield return result;
-        }
-    }
-
-    /// <summary>
-    /// [Obsolete] Use ProcessAutoLanguageDetectionAsync instead
-    /// </summary>
-    [Obsolete("Use ProcessAutoLanguageDetectionAsync instead. This method will be removed in a future version.", false)]
-    public async IAsyncEnumerable<TranscriptionResult> TranscribeStreamWithAutoDetectionAsync(
-        ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var result in ProcessAutoLanguageDetectionAsync(audioStream, candidateLanguages, cancellationToken))
-        {
-            yield return result;
-        }
-    }
-
-    public async IAsyncEnumerable<TranscriptionResult> TranscribeStreamAsync(
-        ChannelReader<byte[]> audioStream, 
-        string language,
-        [EnumeratorCancellation]CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(_options.Azure?.SpeechKey))
-            throw new InvalidOperationException("Azure Speech Key not configured");
-
-        // ✅ Use separate method to avoid yield in try/catch
-        await foreach (var result in ProcessAzureStreamingAsync(audioStream, language, cancellationToken))
+        await foreach (var result in ProcessAzureStreamingAsync(audioStream, primaryLanguage, cancellationToken))
         {
             yield return result;
         }
@@ -402,51 +372,6 @@ public class AzureStreamingSTTService : IStreamingSTTService
             await recognizer.StopContinuousRecognitionAsync();
         }
         catch { /* Ignore cleanup errors */ }
-    }
-    public async Task<TranscriptionResult> TranscribeAudioAsync(
-        byte[] audioData, 
-        string language, 
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(_options.Azure?.SpeechKey))
-            throw new InvalidOperationException("Azure Speech Key not configured");
-
-        try
-        {
-            var speechConfig = SpeechConfig.FromSubscription(_options.Azure.SpeechKey, _options.Azure.SpeechRegion ?? "eastus");
-            speechConfig.SpeechRecognitionLanguage = MapToAzureLanguageCode(language);
-
-            using var audioStream = AudioInputStream.CreatePushStream(AudioStreamFormat.GetWaveFormatPCM(16000, 16, 1));
-            using var audioConfig = AudioConfig.FromStreamInput(audioStream);
-            using var recognizer = new SpeechRecognizer(speechConfig, audioConfig);
-
-            // Write audio data
-            audioStream.Write(audioData);
-            audioStream.Close();
-
-            // Perform recognition
-            var result = await recognizer.RecognizeOnceAsync().ConfigureAwait(false);
-
-            return new TranscriptionResult
-            {
-                Text = result.Reason == ResultReason.RecognizedSpeech ? result.Text : "",
-                Language = language,
-                Confidence = CalculateConfidence(result),
-                IsFinal = true,
-                Timestamp = TimeSpan.FromTicks(result.OffsetInTicks)
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Azure single audio transcription error");
-            return new TranscriptionResult 
-            { 
-                Text = "",
-                Language = language, 
-                Confidence = 0.0,
-                IsFinal = true 
-            };
-        }
     }
 
     /// <summary>
