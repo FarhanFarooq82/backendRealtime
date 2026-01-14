@@ -29,7 +29,7 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
     // ✅ Existing VAD logic
     private readonly List<string> _finalUtterances = new();
     private DateTime _lastResultTime = DateTime.UtcNow;
-    private readonly TimeSpan _vadTimeout = TimeSpan.FromSeconds(3);
+    private readonly TimeSpan _vadTimeout = TimeSpan.FromMilliseconds(1500);
     private string _currentInterimText = string.Empty;
     
     // ✨ NEW: Enhanced speaker and language tracking
@@ -49,8 +49,14 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
         _allResults.Add(result);
         _confidenceScores.Add((float)result.Confidence);
 
+        // FILTERABLE: STT result received
+        Console.WriteLine($"TIMESTAMP_ADD_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Text: '{result.Text}' - IsFinal: {result.IsFinal} - Language: {result.Language}");
+
         if (result.IsFinal)
         {
+            // FILTERABLE: Final result processed
+            Console.WriteLine($"TIMESTAMP_FINAL_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Final text: '{result.Text}' - Language: {result.Language}");
+            
             // ✅ Existing: Add final utterance
             if (!string.IsNullOrWhiteSpace(result.Text))
             {

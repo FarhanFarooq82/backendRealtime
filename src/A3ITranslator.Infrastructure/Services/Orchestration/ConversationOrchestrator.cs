@@ -88,9 +88,15 @@ public class ConversationOrchestrator : IConversationOrchestrator
             return;
         }
 
+        // FILTERABLE: Audio chunk received
+        Console.WriteLine($"TIMESTAMP_AUDIO_CHUNK: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {audioChunk.Length} bytes");
+
         // Start processing pipeline if ready for new cycle
         if (state.ShouldStartNewCycle)
         {
+            // FILTERABLE: First chunk after cycle completion or very first time
+            Console.WriteLine($"TIMESTAMP_FIRST_CHUNK_NEW_CYCLE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting new cycle with first chunk");
+            
             state.StartReceivingAudio();
             _ = Task.Run(() => ProcessConversationPipelineAsync(connectionId, state));
             
@@ -162,17 +168,22 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
             // 2. Start parallel processing tasks
             // CRITICAL: Start broadcaster FIRST so audio flows to channels before consumers start
+            Console.WriteLine($"TASK_START_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting broadcaster task");
             var broadcasterTask = BroadcastAudioAsync(state.AudioStreamChannel.Reader, sttChannel, speakerChannel, connectionId, cycleCts.Token);
             
-            // Small delay to ensure broadcaster has started reading before consumers start waiting
-            await Task.Delay(10, cycleCts.Token);
+            // EXPERIMENT: Remove delay to see if it improves streaming performance
+            // await Task.Delay(10, cycleCts.Token);
             
+            Console.WriteLine($"TASK_START_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting STT task");
             var sttTask = ProcessSTTWithSpeakerContextAsync(sttChannel.Reader, utteranceCollector, state.CandidateLanguages, connectionId, cycleCts.Token);
+            
+            Console.WriteLine($"TASK_START_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting speaker identification task");
             var speakerTask = ProcessSpeakerIdentificationAsync(speakerChannel.Reader, utteranceCollector, connectionId, cycleCts.Token);
 
             _logger.LogDebug("📡 ORCHESTRATOR: Started broadcaster and consumer tasks for {ConnectionId}", connectionId);
 
             // 3. VAD MONITOR: Polling task to check for silence after speech
+            Console.WriteLine($"TASK_START_MonitorTask: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting VAD monitor task");
             var monitorTask = Task.Run(async () => 
             {
                 while (!cycleCts.Token.IsCancellationRequested)
@@ -180,17 +191,21 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     // If we have text and have timed out (enough silence), stop the cycle
                     if (utteranceCollector.HasTimedOut() && utteranceCollector.HasAccumulatedText)
                     {
+                        Console.WriteLine($"TIMESTAMP_VAD_TIMEOUT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - VAD triggered");
                         _logger.LogInformation("🔇 VAD: Silence detected for {ConnectionId}, ending cycle", connectionId);
                         cycleCts.Cancel();
                         break;
                     }
-                    await Task.Delay(500, cycleCts.Token);
+                    await Task.Delay(250, cycleCts.Token);
                 }
+                Console.WriteLine($"TASK_END_MonitorTask: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - VAD monitor task completed");
             }, cycleCts.Token);
 
             // 4. Wait for ANY task to signal completion (VAD, STT end, or Error)
             // CRITICAL: Include broadcasterTask so audio actually flows to STT/speaker channels
+            Console.WriteLine($"TASK_WAIT_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting for any task completion");
             await Task.WhenAny(broadcasterTask, sttTask, speakerTask, monitorTask);
+            Console.WriteLine($"TASK_WAIT_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - One task completed, cancelling others");
 
             // Cancel everything else if one finished naturally
             if (!cycleCts.IsCancellationRequested) cycleCts.Cancel();
@@ -206,6 +221,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 await _notificationService.NotifyProcessingStatusAsync(connectionId, 
                     "Processing your message, please wait...");
 
+                Console.WriteLine($"TIMESTAMP_PROCESS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting ProcessCompletedUtteranceAsync");
                 await ProcessCompletedUtteranceAsync(connectionId, utteranceCollector, state);
             }
         }
@@ -237,48 +253,37 @@ public class ConversationOrchestrator : IConversationOrchestrator
         CancellationToken cancellationToken)
     {
         var chunkCount = 0;
-        var totalBytes = 0;
-        
-        _logger.LogDebug("📡 BROADCASTER: Starting for {ConnectionId}", connectionId);
-        
         try
         {
+            Console.WriteLine($"TASK_START_BroadcastAudioAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster starting audio processing");
+            
             // Read until channel is closed OR until this cycle is cancelled (VAD detected)
             while (await audioReader.WaitToReadAsync(cancellationToken))
             {
                 while (audioReader.TryRead(out var chunk))
                 {
                     chunkCount++;
-                    totalBytes += chunk.Length;
-                    
                     await sttChannel.Writer.WriteAsync(chunk, cancellationToken);
                     await speakerChannel.Writer.WriteAsync(chunk, cancellationToken);
-                    
-                    // Log every 10 chunks to show progress
-                    if (chunkCount % 10 == 0)
-                    {
-                        _logger.LogDebug("📡 BROADCASTER: Sent {ChunkCount} chunks ({TotalBytes} bytes) to STT/Speaker channels for {ConnectionId}", 
-                            chunkCount, totalBytes, connectionId);
-                    }
                 }
             }
+            Console.WriteLine($"TASK_END_BroadcastAudioAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster completed normally");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("🎬 BROADCASTER: Cycle cancelled after {ChunkCount} chunks ({TotalBytes} bytes) for {ConnectionId}", 
-                chunkCount, totalBytes, connectionId);
+            Console.WriteLine($"TASK_CANCELLED_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster cancelled after {chunkCount} chunks");
+            _logger.LogDebug("🎬 BROADCASTER: Cycle cancelled after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ BROADCASTER: Error after {ChunkCount} chunks ({TotalBytes} bytes) for {ConnectionId}", 
-                chunkCount, totalBytes, connectionId);
+            Console.WriteLine($"TASK_ERROR_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster error after {chunkCount} chunks: {ex.Message}");
+            _logger.LogError(ex, "❌ BROADCASTER: Error after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
         }
         finally
         {
             sttChannel.Writer.TryComplete();
             speakerChannel.Writer.TryComplete();
-            _logger.LogDebug("📡 BROADCASTER: Completed - sent {ChunkCount} chunks ({TotalBytes} bytes) for {ConnectionId}", 
-                chunkCount, totalBytes, connectionId);
+            Console.WriteLine($"TASK_FINALLY_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster cleanup completed");
         }
     }
 
@@ -294,18 +299,28 @@ public class ConversationOrchestrator : IConversationOrchestrator
     {
         try
         {
+            Console.WriteLine($"TASK_START_ProcessSTTWithSpeakerContextAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT processing starting");
+            
             await foreach (var result in _sttService.ProcessAutoLanguageDetectionAsync(audioReader, candidateLanguages, cancellationToken))
             {
+                Console.WriteLine($"TIMESTAMP_STT_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Text: '{result.Text}' - IsFinal: {result.IsFinal}");
                 utteranceCollector.AddResult(result);
                 
                 // Send live transcription updates to frontend
                 var displayText = utteranceCollector.GetCurrentDisplayText();
+                Console.WriteLine($"TIMESTAMP_FRONTEND_TRANSCRIPTION_SEND: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending to frontend: '{displayText}'");
                 await _notificationService.NotifyTranscriptionAsync(connectionId, displayText, result.Language, false);
             }
+            Console.WriteLine($"TIMESTAMP_STT_STREAM_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT stream completed");
+            Console.WriteLine($"TASK_END_ProcessSTTWithSpeakerContextAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT processing completed normally");
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        { 
+            Console.WriteLine($"TASK_CANCELLED_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT task cancelled");
+        }
         catch (Exception ex)
         {
+            Console.WriteLine($"TASK_ERROR_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT task error: {ex.Message}");
             if (!cancellationToken.IsCancellationRequested)
                 _logger.LogError(ex, "❌ STT processing error for {ConnectionId}", connectionId);
         }
@@ -322,9 +337,11 @@ public class ConversationOrchestrator : IConversationOrchestrator
     {
         try
         {
+            Console.WriteLine($"TASK_START_ProcessSpeakerIdentificationAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification starting");
+            
             var audioData = new List<byte[]>();
             var bytesReceived = 0;
-            const int MIN_BYTES_FOR_ID = 64000; // ~2 seconds of 16kHz 16-bit audio
+            const int MIN_BYTES_FOR_ID = 20000; // ~2 seconds of WebM/Opus compressed audio (~2446 bytes per 250ms chunk)
             var identificationDone = false;
 
             await foreach (var chunk in audioReader.ReadAllAsync(cancellationToken))
@@ -336,6 +353,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
                 if (bytesReceived >= MIN_BYTES_FOR_ID)
                 {
+                    Console.WriteLine($"TASK_SPEAKER_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Processing speaker identification with {bytesReceived} bytes");
+                    
                     var combinedAudio = audioData.SelectMany(x => x).ToArray();
                     var speakerId = await _speakerService.IdentifySpeakerAsync(combinedAudio, connectionId);
                     
@@ -347,16 +366,22 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
                     utteranceCollector.SetSpeakerContext(speakerId, fingerprint.MatchConfidence, fingerprint);
                     
+                    Console.WriteLine($"TASK_SPEAKER_IDENTIFIED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identified: {speakerId ?? "unknown"}");
                     _logger.LogInformation("🎭 SPEAKER LOCK: {SpeakerId} identified via 2s audio for {ConnectionId}",
                         speakerId ?? "unknown", connectionId);
 
                     identificationDone = true; 
                 }
             }
+            Console.WriteLine($"TASK_END_ProcessSpeakerIdentificationAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification completed");
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        { 
+            Console.WriteLine($"TASK_CANCELLED_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification cancelled");
+        }
         catch (Exception ex)
         {
+            Console.WriteLine($"TASK_ERROR_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification error: {ex.Message}");
             if (!cancellationToken.IsCancellationRequested)
                 _logger.LogError(ex, "❌ Speaker identification error for {ConnectionId}", connectionId);
         }
@@ -386,6 +411,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
             state.StartCompleting();
             await SendConversationResponseAsync(connectionId, utteranceWithContext, genAIResponse, speakerUpdate);
+            
+            // FILTERABLE: Complete utterance signal sent
+            Console.WriteLine($"TIMESTAMP_CYCLE_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Cycle completion signal sent");
             await _notificationService.NotifyCycleCompletionAsync(connectionId, false);
             
             utteranceCollector.Reset();
@@ -498,8 +526,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
         if (session != null)
             _speakerProfileManager.ClearSession(session.SessionId);
     }
-
-    private string GenerateAudioHash(byte[] audio) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(audio))[..12];
 
     private async Task SaveConversationItemAsync(string sessionId, UtteranceWithContext utterance, dynamic genAIResponse) => await Task.CompletedTask;
 

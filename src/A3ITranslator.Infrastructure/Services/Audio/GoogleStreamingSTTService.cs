@@ -157,7 +157,7 @@ public class GoogleStreamingSTTService : IStreamingSTTService
         {"cy-GB", "Welsh (United Kingdom)"}
     };
 
-    public GoogleStreamingSTTService(
+public GoogleStreamingSTTService(
         ILogger<GoogleStreamingSTTService> logger,
         IOptions<ServiceOptions> serviceOptions)
     {
@@ -166,54 +166,148 @@ public class GoogleStreamingSTTService : IStreamingSTTService
         
         try
         {
-            // ✅ Use configuration instead of hardcoded path
             string credentialsPath = _googleOptions.CredentialsPath;
-            
             if (System.IO.File.Exists(credentialsPath))
             {
                 Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath);
             }
-            else
-            {
-                Console.WriteLine($"❌ Google STT Config - Credentials file not found at: {credentialsPath}");
-                _logger.LogError("❌ Google credentials file not found at: {Path}", credentialsPath);
-            }
 
-            _speechClient = SpeechClient.Create();
-          }
+            // CRITICAL FIX: Regional Endpoint must match the location
+            string location = !string.IsNullOrEmpty(_googleOptions.Location) ? _googleOptions.Location : "europe-west4";
+            
+            // If ApiEndpoint is not manually provided, we build the regional one automatically
+            string finalEndpoint = !string.IsNullOrEmpty(_googleOptions.ApiEndpoint) 
+                ? _googleOptions.ApiEndpoint 
+                : $"{location}-speech.googleapis.com";
+
+            _logger.LogInformation("🌐 Initializing Google STT for Location: {Location} at Endpoint: {Endpoint}", location, finalEndpoint);
+
+            _speechClient = new SpeechClientBuilder 
+            { 
+                Endpoint = finalEndpoint 
+            }.Build();
+        }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Google STT Config - Failed to initialize: {ex.Message}");
-            _logger.LogError(ex, "❌ Failed to initialize Google Cloud Speech client. Ensure credentials are configured.");
+            _logger.LogError(ex, "❌ Failed to initialize Google Cloud Speech client.");
         }
     }
 
-
-    private string MapToGoogleLanguageCode(string language)
-    {
-        return GoogleSTTLanguages.ContainsKey(language) ? language : "en-US";
-    }
+    private string MapToGoogleLanguageCode(string language) =>
+        GoogleSTTLanguages.ContainsKey(language) ? language : "en-US";
 
     /// <summary>
-    /// Process audio stream with Google's automatic language detection
+    /// Map Google STT response language codes to our standard BCP-47 format
+    /// Google sometimes returns simplified codes like 'ur' instead of 'ur-PK'
     /// </summary>
-    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+    private string MapFromGoogleResponseLanguage(string? googleLanguageCode)
+    {
+        if (string.IsNullOrEmpty(googleLanguageCode))
+            return "en-US";
+
+        // Direct match first
+        if (GoogleSTTLanguages.ContainsKey(googleLanguageCode))
+            return googleLanguageCode;
+
+        // Map simplified codes to full BCP-47 codes
+        return googleLanguageCode switch
+        {
+            "ur" => "ur-PK",
+            "ar" => "ar-SA", // Default Arabic to Saudi Arabia
+            "zh" => "cmn-Hans-CN", // Default Chinese to Simplified Mandarin
+            "zh-cn" => "cmn-Hans-CN",
+            "zh-tw" => "cmn-Hant-TW", 
+            "zh-hk" => "yue-Hant-HK",
+            "en" => "en-US",
+            "es" => "es-ES",
+            "fr" => "fr-FR",
+            "de" => "de-DE",
+            "it" => "it-IT",
+            "pt" => "pt-PT",
+            "ru" => "ru-RU",
+            "ja" => "ja-JP",
+            "ko" => "ko-KR",
+            "hi" => "hi-IN",
+            "bn" => "bn-IN",
+            "ta" => "ta-IN",
+            "te" => "te-IN",
+            "mr" => "mr-IN",
+            "gu" => "gu-IN",
+            "kn" => "kn-IN",
+            "ml" => "ml-IN",
+            "pa" => "pa-Guru-IN",
+            "ne" => "ne-NP",
+            "th" => "th-TH",
+            "vi" => "vi-VN",
+            "id" => "id-ID",
+            "ms" => "ms-MY",
+            "fil" => "fil-PH",
+            "sw" => "sw-KE",
+            "af" => "af-ZA",
+            "tr" => "tr-TR",
+            "nl" => "nl-NL",
+            "sv" => "sv-SE",
+            "da" => "da-DK",
+            "no" => "no-NO",
+            "fi" => "fi-FI",
+            "pl" => "pl-PL",
+            "cs" => "cs-CZ",
+            "sk" => "sk-SK",
+            "hu" => "hu-HU",
+            "ro" => "ro-RO",
+            "bg" => "bg-BG",
+            "hr" => "hr-HR",
+            "sr" => "sr-RS",
+            "sl" => "sl-SI",
+            "el" => "el-GR",
+            "he" or "iw" => "iw-IL",
+            "uk" => "uk-UA",
+            "be" => "be-BY",
+            "et" => "et-EE",
+            "lv" => "lv-LV",
+            "lt" => "lt-LT",
+            "mk" => "mk-MK",
+            "is" => "is-IS",
+            "mt" => "mt-MT",
+            "ga" => "ga-IE",
+            "cy" => "cy-GB",
+            "eu" => "eu-ES",
+            "ca" => "ca-ES",
+            "gl" => "gl-ES",
+            "fa" => "fa-IR",
+            "ka" => "ka-GE",
+            "hy" => "hy-AM",
+            "az" => "az-AZ",
+            "kk" => "kk-KZ",
+            "ky" => "ky-KG",
+            "uz" => "uz-UZ",
+            "tg" => "tg-TJ",
+            "mn" => "mn-MN",
+            "my" => "my-MM",
+            "km" => "km-KH",
+            "lo" => "lo-LA",
+            "am" => "am-ET",
+            "so" => "so-SO",
+            "ha" => "ha-NG",
+            "yo" => "yo-NG",
+            "ig" => "ig-NG",
+            "zu" => "zu-ZA",
+            "xh" => "xh-ZA",
+            "nso" => "nso-ZA",
+            "sq" => "sq-AL",
+            "bs" => "bs-BA",
+            _ => googleLanguageCode // Return as-is if no mapping found
+        };
+    }
+
+    public async IAsyncEnumerable<TranscriptionResult>  ProcessAutoLanguageDetectionAsync(
         ChannelReader<byte[]> audioStream,
         string[] candidateLanguages,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-   
         if (_speechClient == null)
         {
-            Console.WriteLine($"❌ Google STT Auto-Detection: SpeechClient is null - returning mock result");
-            _logger.LogWarning("Google Speech client not available, using mock results");
-            yield return new TranscriptionResult
-            {
-                Text = "[Google Auto-Detection Mock - No Credentials] Audio processed",
-                Language = candidateLanguages.FirstOrDefault() ?? "en-US",
-                Confidence = 0.5,
-                IsFinal = true
-            };
+            _logger.LogError("SpeechClient is null.");
             yield break;
         }
 
@@ -223,165 +317,108 @@ public class GoogleStreamingSTTService : IStreamingSTTService
         }
     }
 
-    /// <summary>
     private async IAsyncEnumerable<TranscriptionResult> ProcessGoogleAutoDetectionAsync(
         ChannelReader<byte[]> audioStream,
         string[] candidateLanguages,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var resultQueue = new Queue<TranscriptionResult>();
-        var hasError = false;
+        var projectId = GetProjectId().Trim();
+        var location = (!string.IsNullOrEmpty(_googleOptions.Location) ? _googleOptions.Location : "europe-west4").Trim();
         
-        try
+        // IMPORTANT: Use a created recognizer ID for regional stability
+        var recognizerId = (!string.IsNullOrEmpty(_googleOptions.RecognizerId) ? _googleOptions.RecognizerId : "my-realtime-recognizer").Trim();
+        string recognizerPath = $"projects/{projectId}/locations/{location}/recognizers/{recognizerId}";
+
+        var config = new RecognitionConfig
         {
-            var primaryLanguage = candidateLanguages.FirstOrDefault() ?? "en-US";
-            var mappedPrimaryLanguage = MapToGoogleLanguageCode(primaryLanguage);
-            
-            // Simplified configuration for auto-detection - remove conflicting WebM settings
-            var config = new RecognitionConfig
-            {
-                LanguageCodes = { mappedPrimaryLanguage },
-                // Remove ExplicitDecodingConfig to let Google auto-detect audio format
-                Model = "latest_long",  // Use latest_long instead of "long"
-                Features = new RecognitionFeatures
-                {
-                    EnableAutomaticPunctuation = true
-                }
-            };
+            LanguageCodes = { candidateLanguages.FirstOrDefault() ?? "en-US" },
 
-            // Add candidate languages for auto-detection (limit to avoid API errors)
-            var maxLanguages = 3; // Following Google's recommendation
-            var limitedCandidates = candidateLanguages.Where(l => l != primaryLanguage).Take(maxLanguages - 1);
-            foreach (var language in limitedCandidates)
+            ExplicitDecodingConfig = new ExplicitDecodingConfig
             {
-                var mappedCandidate = MapToGoogleLanguageCode(language);
-                if (!config.LanguageCodes.Contains(mappedCandidate))
-                {
-                    config.LanguageCodes.Add(mappedCandidate);
-                }
+                Encoding = ExplicitDecodingConfig.Types.AudioEncoding.WebmOpus,
+                SampleRateHertz = 48000,
+                AudioChannelCount = 1
+
             }
+        };
 
+        var streamingCall = _speechClient!.StreamingRecognize();
 
-            var streamingConfig = new StreamingRecognitionConfig
+        // HANDSHAKE: Send the initial config
+        await streamingCall.WriteAsync(new StreamingRecognizeRequest
+        {
+            Recognizer = recognizerPath,
+            StreamingConfig = new StreamingRecognitionConfig
             {
                 Config = config,
                 StreamingFeatures = new StreamingRecognitionFeatures
                 {
-                    InterimResults = true,
-                    EnableVoiceActivityEvents = false  // Disable voice activity events that might cause issues
+                    InterimResults = true, // KEY FOR LOW LATENCY
+                    EnableVoiceActivityEvents = true 
                 }
-            };
-            var stream = _speechClient!.StreamingRecognize();
-           
-            var projectId = GetProjectId();
-            
-            // Send initial configuration with correct recognizer path for Speech V2
-            await stream.WriteAsync(new StreamingRecognizeRequest
-            {
-                Recognizer = $"projects/{projectId}/locations/global/recognizers/_", // Use _ for default recognizer
-                StreamingConfig = streamingConfig
-            });
+            }
+        });
 
-            // Start audio sending task (exact pattern from WebM method)
-            var audioSendTask = Task.Run(async () =>
+        // Start reading responses in parallel to sending audio
+        var responseEnumerator = streamingCall.GetResponseStream().WithCancellation(cancellationToken);
+
+        var audioPushTask = Task.Run(async () =>
+        {
+            try
             {
-                try
+                await foreach (var chunk in audioStream.ReadAllAsync(cancellationToken))
                 {
-                    var chunkCount = 0;
-                    var totalBytes = 0;
-                    
-                    await foreach (var chunk in audioStream.ReadAllAsync(cancellationToken))
+                    await streamingCall.WriteAsync(new StreamingRecognizeRequest
                     {
-                        chunkCount++;
-                        totalBytes += chunk?.Length ?? 0;
-                        
-                        if (chunkCount == 1)
-                        {
-                            Console.WriteLine($"🌍 Google Auto-Detection: Received first chunk ({chunk?.Length} bytes)");
-                        }
-                        
-                        if (chunk?.Length > 0)
-                        {
-                            await stream.WriteAsync(new StreamingRecognizeRequest
-                            {
-                                Audio = ByteString.CopyFrom(chunk)
-                            });
-                        }
-                    }
-                    
-                    Console.WriteLine($"🌍 Google Auto-Detection Audio Send Completed: {chunkCount} chunks, {totalBytes} total bytes");
+                        Audio = ByteString.CopyFrom(chunk)
+                    });
                 }
-                finally
-                {
-                    await stream.WriteCompleteAsync();
-                }
-            }, cancellationToken);
+            }
+            finally
+            {
+                await streamingCall.WriteCompleteAsync();
+            }
+        });
 
-            // Process responses (exact pattern from WebM method)
-            await foreach (var response in stream.GetResponseStream().WithCancellation(cancellationToken))
-            {               
+        await foreach (var response in responseEnumerator)
+        {
+            if (response.Results?.Count > 0)
+            {
                 foreach (var result in response.Results)
                 {
-                   foreach (var alternative in result.Alternatives)
+                    if (result.Alternatives?.Count > 0)
                     {
-                        // Use Google's detected language from the result (key for auto-detection)
-                        var detectedLanguage = !string.IsNullOrEmpty(result.LanguageCode) 
-                            ? result.LanguageCode 
-                            : primaryLanguage; // Fallback to primary language
+                        var alternative = result.Alternatives[0];
                         
-                        resultQueue.Enqueue(new TranscriptionResult
+                        // Extract Speaker Tag from Diarization (if available)
+                        var speakerLabel = alternative.Words.FirstOrDefault()?.SpeakerLabel ?? "0";
+                        if (speakerLabel != "0" && !string.IsNullOrEmpty(speakerLabel))
+                        {
+                            _logger.LogDebug("🗣️ Speaker {SpeakerLabel} detected in: '{Text}'", speakerLabel, alternative.Transcript);
+                        }
+                        
+                        // The first few results will have IsFinal = false. 
+                        // These are your low-latency 'interim' transcripts.
+                        yield return new TranscriptionResult
                         {
                             Text = alternative.Transcript,
-                            Language = detectedLanguage, // Use Google's detected language
-                            Confidence = alternative.Confidence,
                             IsFinal = result.IsFinal,
-                            Timestamp = TimeSpan.FromSeconds(result.ResultEndOffset?.Seconds ?? 0)
-                        });
+                            Confidence = alternative.Confidence,
+                            Language = MapFromGoogleResponseLanguage(result.LanguageCode)
+                        };
                     }
                 }
             }
-
-            await audioSendTask;
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("🛑 Google Auto-Detection stream cancelled");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Google Auto-Detection stream error");
-            hasError = true;
         }
 
-        // Yield results after try/catch block (exact pattern from WebM method)
-        while (resultQueue.Count > 0)
-        {
-            yield return resultQueue.Dequeue();
-        }
-
-        // Yield error result if needed (exact pattern from WebM method)
-        if (hasError)
-        {
-            yield return new TranscriptionResult
-            {
-                Text = "[Google Auto-Detection Error Fallback] Processing failed",
-                Language = candidateLanguages.FirstOrDefault() ?? "en-US",
-                Confidence = 0.3,
-                IsFinal = true
-            };
-        }
+        // Wait for audio task to complete
+        await audioPushTask;
     }
 
     private string GetProjectId()
     {
-        // Use configuration first, then fall back to environment variables
-        var projectId = !string.IsNullOrEmpty(_googleOptions.ProjectId) 
-            ? _googleOptions.ProjectId
-            : Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT") 
-              ?? Environment.GetEnvironmentVariable("GCP_PROJECT") 
-              ?? "a3itranslator"; // Your actual Google Cloud project ID
-        
-        Console.WriteLine($"🟢 DEBUG: Google STT - Resolved Project ID: {projectId}");
-        return projectId;
+        return (!string.IsNullOrEmpty(_googleOptions.ProjectId) 
+            ? _googleOptions.ProjectId 
+            : Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT") ?? "your-project-id").Trim();
     }
 }

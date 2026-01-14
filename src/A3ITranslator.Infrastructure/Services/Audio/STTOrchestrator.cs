@@ -36,7 +36,6 @@ public class STTOrchestrator : IStreamingSTTService
     {      
         var googleSucceeded = false;
         var fallbackMessage = "[Google Auto-Detection Error Fallback] Processing failed";
-        var results = new List<TranscriptionResult>();
 
         // Priority 1: Google Auto-Detection with candidate languages (handles WebM/Opus chunks with language detection)
         IAsyncEnumerable<TranscriptionResult>? googleResults = null;
@@ -45,6 +44,7 @@ public class STTOrchestrator : IStreamingSTTService
             _logger.LogDebug("🔍 STT Orchestrator: Attempting Google Auto-Detection");
             // Use proper auto language detection method with candidate languages
             googleResults = _googleSTT.ProcessAutoLanguageDetectionAsync(audioStream, candidateLanguages, cancellationToken);
+            Console.WriteLine($"🔍 TIMESTAMP_STT_Orchestrator: {DateTime.Now}");
         }
         catch (Exception ex)
         {
@@ -53,33 +53,22 @@ public class STTOrchestrator : IStreamingSTTService
 
         if (googleResults != null)
         {
-            try
+            await foreach (var result in googleResults)
             {
-                await foreach (var result in googleResults)
+                Console.WriteLine($"TIMESTAMP_STT_ORCHESTRATOR_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Text: '{result.Text}' - IsFinal: {result.IsFinal}");
+                
+                if (result.IsFinal)
                 {
-                    if (result.IsFinal)
-                    {
-                        googleSucceeded = true;
-                    }
-                    
-                    results.Add(result);
+                    googleSucceeded = true;
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ STT Orchestrator: Google Auto-Detection streaming failed");
-            }
-        }
-
-        // Return collected results if Google succeeded
-        if (googleSucceeded)
-        {
-            foreach (var result in results)
-            {
+                
+                // Yield immediately instead of buffering
                 yield return result;
             }
         }
-        else
+
+        // Only provide fallback if Google completely failed and we haven't yielded any results
+        if (!googleSucceeded)
         {
             // If Google Auto-Detection failed, provide fallback result to avoid blocking the pipeline
             _logger.LogWarning("⚠️ STT Orchestrator: Google Auto-Detection failed, sending fallback message");
