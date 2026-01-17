@@ -8,7 +8,13 @@ namespace A3ITranslator.Application.Services;
 public interface ITranslationOrchestrator
 {
     /// <summary>
-    /// Process translation with conditional AI assistance
+    /// Process translation with conditional AI assistance (Legacy method - for backward compatibility)
     /// </summary>
     Task<TranslationResponse> ProcessTranslationAsync(EnhancedTranslationRequest request);
+
+    /// <summary>
+    /// Process enhanced translation with structured response for maximum performance
+    /// Returns new structured format that routes different data to different services
+    /// </summary>
+    Task<EnhancedTranslationResponse> ProcessEnhancedTranslationAsync(EnhancedTranslationRequest request);
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options; // ✅ Add this for IOptions
 using A3ITranslator.API.Hubs;
 using A3ITranslator.API.Services;
 using A3ITranslator.Application.Services;
+using A3ITranslator.Application.Services.Speaker; // ✅ Add for clean speaker services
 using A3ITranslator.Application.Domain.Interfaces; // ✅ Add for ISessionRepository
 using A3ITranslator.Infrastructure.Persistence.Repositories; // ✅ Add for InMemorySessionRepository
 using A3ITranslator.Infrastructure.Services.Audio;
@@ -58,6 +59,7 @@ builder.Services.AddSingleton<AudioTestCollector>(); // ✅ SINGLETON: Accumulat
 
 // 🔧 Non-stateful services upgraded to Singleton for Orchestrator compatibility
 builder.Services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
+builder.Services.AddSingleton<IAudioFeatureExtractor, AudioFeatureExtractor>(); // ✅ SINGLETON: Feature extraction service
 builder.Services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
 builder.Services.AddSingleton<IRealtimeNotificationService, SignalRNotificationService>();
 builder.Services.AddSingleton<IGenAIService, AzureGenAIService>();
@@ -67,6 +69,9 @@ builder.Services.AddSingleton<IFactExtractionService, FactExtractionService>();
 // 🆕 Translation Services
 builder.Services.AddSingleton<ITranslationPromptService, TranslationPromptService>();
 builder.Services.AddSingleton<ITranslationOrchestrator, TranslationOrchestrator>();
+
+// ✅ Clean Services already registered in InfrastructureServiceRegistration
+builder.Services.AddSingleton<DataRouterService>();
 
 // TODO: Add these when they exist
 // builder.Services.AddScoped<IStreamingTranslationService, StreamingTranslationService>();

@@ -1,16 +1,19 @@
 using A3ITranslator.Application.DTOs.Common;
+using A3ITranslator.Application.DTOs.Frontend;
 using A3ITranslator.Application.Orchestration;
 using A3ITranslator.Application.Services;
+using A3ITranslator.Application.Services.Frontend;
 using A3ITranslator.Application.Domain.Interfaces;
 using A3ITranslator.Application.Domain.Entities;
 using A3ITranslator.Application.Models.Conversation;
-using A3ITranslator.Application.Models.SpeakerProfiles;
+using A3ITranslator.Application.Models.Speaker;
 using A3ITranslator.Application.Services.Speaker;
 using A3ITranslator.Application.Enums;
+using A3ITranslator.Infrastructure.Services.Azure;
 using Microsoft.Extensions.Logging;
-using A3ITranslator.Application.DTOs.Speaker;
 using System.Threading.Channels;
 using A3ITranslator.Application.Models;
+using A3ITranslator.Infrastructure.Services.Translation; // ✅ For ConversationHistoryItem
 
 // ✅ PURE DOMAIN: Type aliases for clean architecture
 using DomainSession = A3ITranslator.Application.Domain.Entities.ConversationSession;
@@ -30,9 +33,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly ISessionRepository _sessionRepository;
     private readonly IStreamingSTTService _sttService;
     private readonly ISpeakerIdentificationService _speakerService;
-    private readonly ISpeakerDecisionEngine _speakerDecisionEngine;
-    private readonly ISpeakerProfileManager _speakerProfileManager;
+    private readonly ISpeakerManagementService _speakerManager;
     private readonly ITranslationOrchestrator _translationOrchestrator;
+    private readonly IFrontendConversationItemService _frontendService;
+    private readonly IAudioFeatureExtractor _featureExtractor;
 
     // Per-connection conversation state
     private readonly Dictionary<string, ConversationState> _connectionStates = new();
@@ -45,9 +49,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ISessionRepository sessionRepository,
         IStreamingSTTService sttService,
         ISpeakerIdentificationService speakerService,
-        ISpeakerDecisionEngine speakerDecisionEngine,
-        ISpeakerProfileManager speakerProfileManager,
-        ITranslationOrchestrator translationOrchestrator)
+        ISpeakerManagementService speakerManager,
+        ITranslationOrchestrator translationOrchestrator,
+        IFrontendConversationItemService frontendService,
+        IAudioFeatureExtractor featureExtractor)
     {
         _logger = logger;
         _notificationService = notificationService;
@@ -55,19 +60,22 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _sessionRepository = sessionRepository;
         _sttService = sttService;
         _speakerService = speakerService;
-        _speakerDecisionEngine = speakerDecisionEngine;
-        _speakerProfileManager = speakerProfileManager;
+        _speakerManager = speakerManager;
         _translationOrchestrator = translationOrchestrator;
+        _frontendService = frontendService;
+        _featureExtractor = featureExtractor;
     }
 
     /// <summary>
     /// Main entry point: Process audio chunk with proper state management
+    /// Follows the original design: Accept chunks only when Ready, process with VAD timeout
     /// </summary>
     public async Task ProcessAudioChunkAsync(string connectionId, byte[] audioChunk)
     {
         var state = GetOrCreateConversationState(connectionId);
         
-        // Check if we can accept audio in current state
+        // STRICT DESIGN COMPLIANCE: Only accept audio when Ready or during active reception
+        // Once VAD triggers (ProcessingUtterance), reject all new chunks until cycle completes
         if (!state.CanAcceptAudio)
         {
             _logger.LogWarning("🚫 ORCHESTRATOR: Rejecting audio chunk for {ConnectionId} - state: {State}", 
@@ -79,28 +87,37 @@ public class ConversationOrchestrator : IConversationOrchestrator
             return;
         }
         
-        // Write to audio stream channel
-        var writeResult = state.AudioStreamChannel.Writer.TryWrite(audioChunk);
-        
-        if (!writeResult)
-        {
-            _logger.LogWarning("❌ ORCHESTRATOR: Failed to write audio chunk to channel for {ConnectionId}", connectionId);
-            return;
-        }
-
         // FILTERABLE: Audio chunk received
         Console.WriteLine($"TIMESTAMP_AUDIO_CHUNK: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {audioChunk.Length} bytes");
 
-        // Start processing pipeline if ready for new cycle
+        // Start NEW cycle only when explicitly Ready (after previous cycle completed)
         if (state.ShouldStartNewCycle)
         {
-            // FILTERABLE: First chunk after cycle completion or very first time
-            Console.WriteLine($"TIMESTAMP_FIRST_CHUNK_NEW_CYCLE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting new cycle with first chunk");
+            // FILTERABLE: Starting completely new conversation cycle
+            Console.WriteLine($"TIMESTAMP_NEW_CYCLE_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting new conversation cycle");
             
             state.StartReceivingAudio();
+            
+            // Write the triggering chunk to start the stream
+            var writeResult = state.AudioStreamChannel.Writer.TryWrite(audioChunk);
+            if (!writeResult)
+            {
+                _logger.LogWarning("❌ ORCHESTRATOR: Failed to write initial audio chunk to channel for {ConnectionId}", connectionId);
+                return;
+            }
+            
             _ = Task.Run(() => ProcessConversationPipelineAsync(connectionId, state));
             
-            _logger.LogDebug("🎤 ORCHESTRATOR: Started new cycle for {ConnectionId} - now receiving audio", connectionId);
+            _logger.LogDebug("🎤 ORCHESTRATOR: Started new conversation cycle for {ConnectionId}", connectionId);
+        }
+        else if (state.CycleState == ConversationPhase.ReceivingAudio)
+        {
+            // Continue feeding existing pipeline with additional chunks
+            var writeResult = state.AudioStreamChannel.Writer.TryWrite(audioChunk);
+            if (!writeResult)
+            {
+                _logger.LogWarning("❌ ORCHESTRATOR: Failed to write audio chunk to active pipeline for {ConnectionId}", connectionId);
+            }
         }
     }
 
@@ -163,22 +180,24 @@ public class ConversationOrchestrator : IConversationOrchestrator
             var utteranceCollector = new MultiLanguageSpeakerAwareUtteranceCollector();
 
             // 1. Create fan-out channels (temporary for this cycle)
+            // 1. Create fan-out channels (temporary for this cycle)
             var sttChannel = Channel.CreateUnbounded<byte[]>();
-            var speakerChannel = Channel.CreateUnbounded<byte[]>();
+            
+            // ✨ NEW: Background Rolling Feature Accumulator (Zero Latency)
+            var rollingFingerprint = new AudioFingerprint();
 
             // 2. Start parallel processing tasks
             // CRITICAL: Start broadcaster FIRST so audio flows to channels before consumers start
             Console.WriteLine($"TASK_START_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting broadcaster task");
-            var broadcasterTask = BroadcastAudioAsync(state.AudioStreamChannel.Reader, sttChannel, speakerChannel, connectionId, cycleCts.Token);
-            
-            // EXPERIMENT: Remove delay to see if it improves streaming performance
-            // await Task.Delay(10, cycleCts.Token);
+            var broadcasterTask = BroadcastAudioAsync(
+                state.AudioStreamChannel.Reader, 
+                sttChannel, 
+                rollingFingerprint, // Pass accumulator
+                connectionId, 
+                cycleCts.Token);
             
             Console.WriteLine($"TASK_START_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting STT task");
             var sttTask = ProcessSTTWithSpeakerContextAsync(sttChannel.Reader, utteranceCollector, state.CandidateLanguages, connectionId, cycleCts.Token);
-            
-            Console.WriteLine($"TASK_START_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting speaker identification task");
-            var speakerTask = ProcessSpeakerIdentificationAsync(speakerChannel.Reader, utteranceCollector, connectionId, cycleCts.Token);
 
             _logger.LogDebug("📡 ORCHESTRATOR: Started broadcaster and consumer tasks for {ConnectionId}", connectionId);
 
@@ -202,9 +221,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
             }, cycleCts.Token);
 
             // 4. Wait for ANY task to signal completion (VAD, STT end, or Error)
-            // CRITICAL: Include broadcasterTask so audio actually flows to STT/speaker channels
+            // CRITICAL: Include broadcasterTask so audio actually flows to STT channels
             Console.WriteLine($"TASK_WAIT_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting for any task completion");
-            await Task.WhenAny(broadcasterTask, sttTask, speakerTask, monitorTask);
+            await Task.WhenAny(broadcasterTask, sttTask, monitorTask);
             Console.WriteLine($"TASK_WAIT_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - One task completed, cancelling others");
 
             // Cancel everything else if one finished naturally
@@ -222,6 +241,11 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     "Processing your message, please wait...");
 
                 Console.WriteLine($"TIMESTAMP_PROCESS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting ProcessCompletedUtteranceAsync");
+                Console.WriteLine($"TIMESTAMP_PROCESS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting ProcessCompletedUtteranceAsync");
+                
+                // Pass the accumulated fingerprint to the processing logic
+                utteranceCollector.SetSpeakerContext(null, 0, rollingFingerprint);
+                
                 await ProcessCompletedUtteranceAsync(connectionId, utteranceCollector, state);
             }
         }
@@ -248,7 +272,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private async Task BroadcastAudioAsync(
         ChannelReader<byte[]> audioReader, 
         Channel<byte[]> sttChannel, 
-        Channel<byte[]> speakerChannel,
+        AudioFingerprint fingerprintAccumulator,
         string connectionId,
         CancellationToken cancellationToken)
     {
@@ -264,7 +288,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 {
                     chunkCount++;
                     await sttChannel.Writer.WriteAsync(chunk, cancellationToken);
-                    await speakerChannel.Writer.WriteAsync(chunk, cancellationToken);
+                    
+                    // ✨ Background Feature Extraction (Zero Latency)
+                    _ = _featureExtractor.AccumulateFeaturesAsync(chunk, fingerprintAccumulator);
                 }
             }
             Console.WriteLine($"TASK_END_BroadcastAudioAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster completed normally");
@@ -282,7 +308,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
         finally
         {
             sttChannel.Writer.TryComplete();
-            speakerChannel.Writer.TryComplete();
             Console.WriteLine($"TASK_FINALLY_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster cleanup completed");
         }
     }
@@ -311,8 +336,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 Console.WriteLine($"TIMESTAMP_FRONTEND_TRANSCRIPTION_SEND: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending to frontend: '{displayText}'");
                 await _notificationService.NotifyTranscriptionAsync(connectionId, displayText, result.Language, false);
             }
-            Console.WriteLine($"TIMESTAMP_STT_STREAM_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT stream completed");
-            Console.WriteLine($"TASK_END_ProcessSTTWithSpeakerContextAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT processing completed normally");
         }
         catch (OperationCanceledException) 
         { 
@@ -329,63 +352,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
     /// <summary>
     /// Process speaker identification with "First-Capture-Locking" for zero latency
     /// </summary>
-    private async Task ProcessSpeakerIdentificationAsync(
-        ChannelReader<byte[]> audioReader,
-        MultiLanguageSpeakerAwareUtteranceCollector utteranceCollector,
-        string connectionId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            Console.WriteLine($"TASK_START_ProcessSpeakerIdentificationAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification starting");
-            
-            var audioData = new List<byte[]>();
-            var bytesReceived = 0;
-            const int MIN_BYTES_FOR_ID = 20000; // ~2 seconds of WebM/Opus compressed audio (~2446 bytes per 250ms chunk)
-            var identificationDone = false;
-
-            await foreach (var chunk in audioReader.ReadAllAsync(cancellationToken))
-            {
-                if (identificationDone) continue; 
-
-                audioData.Add(chunk);
-                bytesReceived += chunk.Length;
-
-                if (bytesReceived >= MIN_BYTES_FOR_ID)
-                {
-                    Console.WriteLine($"TASK_SPEAKER_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Processing speaker identification with {bytesReceived} bytes");
-                    
-                    var combinedAudio = audioData.SelectMany(x => x).ToArray();
-                    var speakerId = await _speakerService.IdentifySpeakerAsync(combinedAudio, connectionId);
-                    
-                    var fingerprint = new AudioFingerprint
-                    {
-                        AveragePitch = 150f,
-                        MatchConfidence = speakerId != null ? 85f : 30f
-                    };
-
-                    utteranceCollector.SetSpeakerContext(speakerId, fingerprint.MatchConfidence, fingerprint);
-                    
-                    Console.WriteLine($"TASK_SPEAKER_IDENTIFIED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identified: {speakerId ?? "unknown"}");
-                    _logger.LogInformation("🎭 SPEAKER LOCK: {SpeakerId} identified via 2s audio for {ConnectionId}",
-                        speakerId ?? "unknown", connectionId);
-
-                    identificationDone = true; 
-                }
-            }
-            Console.WriteLine($"TASK_END_ProcessSpeakerIdentificationAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification completed");
-        }
-        catch (OperationCanceledException) 
-        { 
-            Console.WriteLine($"TASK_CANCELLED_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification cancelled");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"TASK_ERROR_ProcessSpeakerIdentificationAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Speaker identification error: {ex.Message}");
-            if (!cancellationToken.IsCancellationRequested)
-                _logger.LogError(ex, "❌ Speaker identification error for {ConnectionId}", connectionId);
-        }
-    }
 
     private async Task ProcessCompletedUtteranceAsync(
         string connectionId, 
@@ -394,38 +360,74 @@ public class ConversationOrchestrator : IConversationOrchestrator
     {
         try
         {
+            Console.WriteLine($"TIMESTAMP_UTTERANCE_PROCESSING_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting utterance processing");
+
             var utteranceWithContext = utteranceCollector.GetUtteranceWithResolvedLanguages(
                 state.CandidateLanguages,
                 state.PrimaryLanguage!);
 
-            var existingSpeakers = _speakerProfileManager.GetSpeakerProfiles(state.SessionId!);
+            Console.WriteLine($"TIMESTAMP_UTTERANCE_RESOLVED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Utterance languages resolved: {utteranceWithContext.SourceLanguage} → {utteranceWithContext.TargetLanguage}");
+
+            Console.WriteLine($"TIMESTAMP_GENAI_REQUEST_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending to Translation Orchestrator");
             var genAIResponse = await ProcessWithGenAI(utteranceWithContext, state);
-            var speakerInsights = ExtractSpeakerInsights(genAIResponse);
+            Console.WriteLine($"TIMESTAMP_GENAI_RESPONSE_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Translation Orchestrator completed");
 
-            var speakerDecision = _speakerDecisionEngine.MakeDecision(
-                utteranceWithContext, existingSpeakers, speakerInsights);
+            // 🚀 CLEAN: One speaker manager to rule them all
+            var speakerPayload = new Application.DTOs.Translation.SpeakerServicePayload
+            {
+                Identification = genAIResponse.SpeakerIdentification ?? new(),
+                ProfileUpdate = genAIResponse.SpeakerProfileUpdate ?? new(),
+                AudioLanguage = utteranceWithContext.DominantLanguage,
+                TranscriptionConfidence = utteranceWithContext.TranscriptionConfidence,
+                AudioFingerprint = utteranceWithContext.AudioFingerprint // Pass raw DNA for sync
+            };
 
-            var speakerUpdate = _speakerProfileManager.ProcessSpeakerDecision(state.SessionId!, speakerDecision);
+            Console.WriteLine($"TIMESTAMP_SPEAKER_PROCESS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Processing speaker identification");
+            // Pass the GenAI Decision (Identification) + Raw DNA (Payload) to the Manager
+            var speakerResult = await _speakerManager.ProcessSpeakerIdentificationAsync(state.SessionId!, speakerPayload);
+            
+            state.LastSpeakerId = speakerResult.SpeakerId;
 
-            state.LastSpeakerId = speakerDecision.MatchedSpeaker?.SpeakerId ?? speakerDecision.NewSpeaker?.SpeakerId;
-
+            Console.WriteLine($"TIMESTAMP_PARALLEL_RESPONSES_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting parallel response processing");
             state.StartCompleting();
-            await SendConversationResponseAsync(connectionId, utteranceWithContext, genAIResponse, speakerUpdate);
+            
+            // 🚀 PARALLEL PROCESSING: Send all responses concurrently
+            await SendConversationResponseParallelAsync(connectionId, utteranceWithContext, genAIResponse, speakerResult);
+            
+            Console.WriteLine($"TIMESTAMP_PARALLEL_RESPONSES_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Parallel response processing completed");
             
             // FILTERABLE: Complete utterance signal sent
             Console.WriteLine($"TIMESTAMP_CYCLE_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Cycle completion signal sent");
             await _notificationService.NotifyCycleCompletionAsync(connectionId, false);
             
             utteranceCollector.Reset();
+            Console.WriteLine($"TIMESTAMP_UTTERANCE_PROCESSING_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Utterance processing completed");
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"TIMESTAMP_UTTERANCE_PROCESSING_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Error: {ex.Message}");
             _logger.LogError(ex, "❌ Error finalising utterance for {ConnectionId}", connectionId);
         }
     }
 
-    private async Task<A3ITranslator.Application.DTOs.Translation.TranslationResponse> ProcessWithGenAI(UtteranceWithContext utterance, ConversationState state)
+    private async Task<A3ITranslator.Application.DTOs.Translation.EnhancedTranslationResponse> ProcessWithGenAI(UtteranceWithContext utterance, ConversationState state)
     {
+        // 🚀 FETCH HISTORY: Get last 5 turns
+        var session = await _sessionRepository.GetByIdAsync(state.SessionId!, CancellationToken.None);
+        var recentHistory = new List<ConversationHistoryItem>();
+        if (session != null)
+        {
+             recentHistory = session.ConversationHistory
+                .TakeLast(5)
+                .Select(t => new ConversationHistoryItem 
+                { 
+                    SpeakerId = t.SpeakerId, 
+                    SpeakerName = t.SpeakerName, 
+                    Text = t.OriginalText 
+                })
+                .ToList();
+        }
+
         var request = new A3ITranslator.Application.DTOs.Translation.EnhancedTranslationRequest
         {
             Text = utterance.Text,
@@ -434,66 +436,139 @@ public class ConversationOrchestrator : IConversationOrchestrator
             SessionContext = new Dictionary<string, object>
             {
                 ["sessionId"] = state.SessionId!,
-                ["speakers"] = _speakerProfileManager.GetSpeakerProfiles(state.SessionId!)
+                ["speakers"] = _speakerManager.GetSessionSpeakers(state.SessionId!)
                                 .Select(s => new { s.SpeakerId, s.DisplayName, s.Insights.AssignedRole }),
                 ["lastSpeaker"] = state.LastSpeakerId ?? "None",
-                ["audioProvisionalId"] = utterance.ProvisionalSpeakerId ?? "Unknown"
+                ["audioProvisionalId"] = utterance.ProvisionalSpeakerId ?? "Unknown",
+                ["recentHistory"] = recentHistory
             }
         };
 
-        return await _translationOrchestrator.ProcessTranslationAsync(request);
+        // 🚀 FEATURES-ONLY FLOW: Inject Comparison Scorecard
+        if (utterance.AudioFingerprint != null)
+        {
+            var candidates = _speakerManager.GetSessionSpeakers(state.SessionId!);
+            var scorecard = _speakerService.CompareFingerprints(utterance.AudioFingerprint, candidates);
+            request.SessionContext["speakerScorecard"] = scorecard;
+            request.SessionContext["acousticDNA"] = utterance.AudioFingerprint; // Send raw if needed by prompt builder
+        }
+
+        // Use the enhanced translation processing method
+        return await _translationOrchestrator.ProcessEnhancedTranslationAsync(request);
     }
 
-    private SpeakerInsights? ExtractSpeakerInsights(A3ITranslator.Application.DTOs.Translation.TranslationResponse response)
+    private async Task SendConversationResponseParallelAsync(
+        string connectionId, 
+        UtteranceWithContext utterance, 
+        A3ITranslator.Application.DTOs.Translation.EnhancedTranslationResponse translationResponse, 
+        SpeakerOperationResult speakerUpdate)
     {
-        try 
+        try
         {
-            if (response.SpeakerAnalysis != null)
-            {
-                var sa = response.SpeakerAnalysis;
-                var insights = new SpeakerInsights
-                {
-                    SuggestedName = sa.DetectedName,
-                    DetectedGender = Enum.TryParse<SpeakerGender>(sa.SpeakerGender, true, out SpeakerGender g) ? g : SpeakerGender.Unknown,
-                    AnalysisConfidence = sa.Confidence * 100f,
-                    CommunicationStyle = "Standard", // Default values since LinguisticDNA is not available
-                    AssignedRole = null,
-                    SentenceComplexity = "Medium",
-                    TurnContext = "General",
-                    TypicalPhrases = new List<string>()
-                };
+            Console.WriteLine($"TIMESTAMP_PARALLEL_CONVERSATION_RESPONSE_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting parallel conversation response processing");
 
-                return insights;
+            var state = GetOrCreateConversationState(connectionId);
+
+            // Prepare all the data needed for parallel operations
+            var speakers = _speakerManager.GetSessionSpeakers(state.SessionId ?? "");
+            var activeSpeaker = speakers.FirstOrDefault(s => s.SpeakerId == (speakerUpdate.SpeakerId ?? state.LastSpeakerId)) 
+                ?? new SpeakerProfile { SpeakerId = "unknown", DisplayName = "Unknown Speaker" };
+
+            // 🚀 STEP 1: Process and Send Speaker Update Sequentially (Ensures UI has name before bubble)
+            if (speakerUpdate.Success)
+            {
+                Console.WriteLine($"TIMESTAMP_SPEAKER_SEQUENTIAL_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting speaker profile logic");
+                var frontendSpeakerUpdate = _frontendService.CreateSpeakerListUpdate(speakers);
+                await _notificationService.SendFrontendSpeakerListAsync(connectionId, frontendSpeakerUpdate);
+                
+                _logger.LogInformation("🎭 Speaker profile updated and sent: {SpeakerId} ({DisplayName})", 
+                    speakerUpdate.SpeakerId, activeSpeaker.DisplayName);
             }
+
+            // 🚀 STEP 2: Send other responses in parallel
+            var tasks = new List<Task>();
+            
+            // Determine TTS text and language - prioritize AI response when available
+            string ttsText;
+            string ttsLanguage;
+            
+            if (translationResponse.AIAssistance.TriggerDetected && 
+                !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+            {
+                // Use AI response for TTS when AI assistance is triggered
+                ttsText = translationResponse.AIAssistance.Response??string.Empty;
+                ttsLanguage = translationResponse.AIAssistance.ResponseLanguage ?? translationResponse.TranslationLanguage ?? "en";
+            }
+            else
+            {
+                // Use regular translation for TTS
+                ttsText = translationResponse.Translation ?? "";
+                ttsLanguage = translationResponse.TranslationLanguage ?? "en";
+            }
+
+            if (!string.IsNullOrEmpty(ttsText))
+            {
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        await SendToTTSContinuousAsync(connectionId, ttsText, ttsLanguage, state);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "❌ Continuous TTS error for {ConnectionId}", connectionId);
+                    }
+                }));
+            }
+
+            // Re-create the conversation items with the UPDATED active speaker info
+            var mainConversationItem = _frontendService.CreateFromTranslation(
+                utterance,
+                translationResponse.Translation ?? "",
+                translationResponse.TranslationLanguage ?? "en",
+                translationResponse.Confidence,
+                activeSpeaker,
+                utterance.SpeakerConfidence
+            );
+
+            FrontendConversationItem? aiConversationItem = null;
+            if (translationResponse.AIAssistance.TriggerDetected && 
+                !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+            {
+                aiConversationItem = _frontendService.CreateFromAIResponse(
+                    utterance.DominantLanguage,
+                    translationResponse.AIAssistance.Response??string.Empty,
+                    translationResponse.AIAssistance.ResponseTranslated,
+                    translationResponse.AIAssistance.ResponseLanguage ?? translationResponse.TranslationLanguage ?? "en",
+                    translationResponse.Confidence
+                );
+            }
+
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    await _notificationService.SendFrontendConversationItemAsync(connectionId, mainConversationItem);
+                    if (aiConversationItem != null)
+                    {
+                        await _notificationService.SendFrontendConversationItemAsync(connectionId, aiConversationItem);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Conversation item error for {ConnectionId}", connectionId);
+                }
+            }));
+
+            // Wait for all parallel tasks to complete
+            await Task.WhenAll(tasks);
+            Console.WriteLine($"TIMESTAMP_PARALLEL_CONVERSATION_RESPONSE_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Parallel conversation response processing completed");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("⚠️ Could not parse SpeakerInsights from GenAI: {Msg}", ex.Message);
+            Console.WriteLine($"TIMESTAMP_PARALLEL_CONVERSATION_RESPONSE_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Error: {ex.Message}");
+            _logger.LogError(ex, "❌ Error in parallel conversation response for {ConnectionId}", connectionId);
         }
-        return new SpeakerInsights { AnalysisConfidence = 0 };
-    }
-
-    private async Task SendConversationResponseAsync(string connectionId, UtteranceWithContext utterance, A3ITranslator.Application.DTOs.Translation.TranslationResponse genAIResponse, SpeakerListUpdate speakerUpdate)
-    {
-        await _notificationService.NotifyTranscriptionAsync(
-            connectionId, 
-            genAIResponse.ImprovedTranscription ?? utterance.Text, 
-            utterance.DominantLanguage, 
-            true);
-
-        await _notificationService.NotifyTranslationAsync(
-            connectionId, 
-            genAIResponse.Translation ?? "Translation error", 
-            utterance.TargetLanguage, 
-            true);
-
-        if (speakerUpdate.HasChanges)
-            await _notificationService.NotifySpeakerUpdateAsync(connectionId, speakerUpdate);
-
-        // TTS stream
-        var translatedText = genAIResponse.Translation;
-        if (!string.IsNullOrEmpty(translatedText))
-            await _ttsService.SynthesizeAndNotifyAsync(connectionId, translatedText, utterance.TargetLanguage);
     }
 
     private ConversationState GetOrCreateConversationState(string connectionId)
@@ -507,6 +582,181 @@ public class ConversationOrchestrator : IConversationOrchestrator
             }
             return state;
         }
+    }
+
+    /// <summary>
+    /// Enhanced TTS processing with gender-aware voice selection and cost optimization
+    /// </summary>
+    private async Task SendToTTSAsync(string connectionId, string text, string language, ConversationState state)
+    {
+        try
+        {
+            Console.WriteLine($"TIMESTAMP_TTS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting TTS processing");
+
+            var speakerGender = SpeakerGender.Unknown;
+            
+            // Try to get gender from last identified speaker for optimal voice selection
+            if (state?.SessionId != null && !string.IsNullOrEmpty(state.LastSpeakerId))
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_SPEAKER_LOOKUP: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Looking up speaker gender");
+                var sessionSpeakers = _speakerManager.GetSessionSpeakers(state.SessionId);
+                var lastSpeaker = sessionSpeakers?.FirstOrDefault(s => s.SpeakerId == state.LastSpeakerId);
+                if (lastSpeaker != null)
+                {
+                    speakerGender = lastSpeaker.Gender; // Use directly, same enum
+                    _logger.LogInformation("🎭 Using detected speaker gender {Gender} for TTS voice selection", speakerGender);
+                }
+            }
+
+            // Use neural voice service with gender-aware selection if available
+            if (_ttsService is AzureNeuralVoiceService neuralVoiceService)
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_NEURAL_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Using Neural TTS service");
+                _logger.LogInformation("🔊 Sending to Neural TTS: {Text} (Language: {Language}, Gender: {Gender})", 
+                    text, language, speakerGender);
+                
+                var chunkCount = 0;
+                // Use gender-aware voice synthesis with standard voices by default for cost optimization
+                await foreach (var chunk in neuralVoiceService.SynthesizeWithGenderAsync(
+                    text, language, speakerGender, VoiceStyle.Conversational, isPremium: false))
+                {
+                    chunkCount++;
+                    Console.WriteLine($"TIMESTAMP_TTS_CHUNK_SEND: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending TTS chunk {chunkCount}: {chunk.AudioData.Length} bytes");
+                    
+                    // Create and send frontend TTS chunk
+                    var frontendTTSChunk = _frontendService.CreateTTSChunk(
+                        "neural-tts-" + Guid.NewGuid().ToString()[..8], // conversationItemId
+                        Convert.ToBase64String(chunk.AudioData),        // audioData as base64
+                        chunk.AssociatedText,                          // text
+                        chunk.ChunkIndex,                              // chunkIndex
+                        chunk.TotalChunks,                             // totalChunks
+                        0.0,                                           // durationMs (could be calculated if needed)
+                        "audio/mp3"                                    // audioFormat
+                    );
+                    
+                    await _notificationService.SendFrontendTTSChunkAsync(connectionId, frontendTTSChunk);
+                    
+                    Console.WriteLine($"TIMESTAMP_TTS_CHUNK_SENT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - TTS chunk {chunkCount} sent successfully");
+                    _logger.LogTrace("🎵 Neural TTS chunk sent: {Size} bytes", chunk.AudioData.Length);
+                }
+                
+                Console.WriteLine($"TIMESTAMP_TTS_NEURAL_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Neural TTS completed, total chunks: {chunkCount}");
+            }
+            else
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_STANDARD_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Using Standard TTS service");
+                // Fallback to standard TTS service
+                _logger.LogInformation("🔊 Sending to Standard TTS: {Text} (Language: {Language})", text, language);
+                await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
+                Console.WriteLine($"TIMESTAMP_TTS_STANDARD_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Standard TTS completed");
+            }
+
+            Console.WriteLine($"TIMESTAMP_TTS_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - TTS processing completed");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"TIMESTAMP_TTS_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - TTS error: {ex.Message}");
+            _logger.LogError(ex, "❌ Error sending text to enhanced TTS for {ConnectionId}", connectionId);
+        }
+    }
+
+    /// <summary>
+    /// Continuous TTS processing that sends chunks independently until completion
+    /// This method runs independently and doesn't wait for other processing to complete
+    /// </summary>
+    private async Task SendToTTSContinuousAsync(string connectionId, string text, string language, ConversationState state)
+    {
+        try
+        {
+            Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting continuous TTS processing");
+
+            var speakerGender = SpeakerGender.Unknown;
+            
+            // Try to get gender from last identified speaker for optimal voice selection
+            if (state?.SessionId != null && !string.IsNullOrEmpty(state.LastSpeakerId))
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_SPEAKER_LOOKUP: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Looking up speaker gender for continuous TTS");
+                var sessionSpeakers = _speakerManager.GetSessionSpeakers(state.SessionId);
+                var lastSpeaker = sessionSpeakers?.FirstOrDefault(s => s.SpeakerId == state.LastSpeakerId);
+                if (lastSpeaker != null)
+                {
+                    speakerGender = lastSpeaker.Gender;
+                    _logger.LogInformation("🎭 Continuous TTS using detected speaker gender {Gender}", speakerGender);
+                }
+            }
+
+            // Use neural voice service with gender-aware selection if available
+            if (_ttsService is AzureNeuralVoiceService neuralVoiceService)
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_NEURAL_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Using Neural TTS for continuous streaming");
+                _logger.LogInformation("🔊 Starting continuous Neural TTS: {Text} (Language: {Language}, Gender: {Gender})", 
+                    text, language, speakerGender);
+                
+                var chunkCount = 0;
+                var conversationItemId = "continuous-tts-" + Guid.NewGuid().ToString()[..8];
+                
+                // 🚀 CONTINUOUS CHUNK SENDING: Each chunk is sent immediately as it's generated
+                await foreach (var chunk in neuralVoiceService.SynthesizeWithGenderAsync(
+                    text, language, speakerGender, VoiceStyle.Conversational, isPremium: false))
+                {
+                    chunkCount++;
+                    Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_CHUNK_SEND: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending continuous TTS chunk {chunkCount}: {chunk.AudioData.Length} bytes");
+                    
+                    // Create and send frontend TTS chunk immediately
+                    var frontendTTSChunk = _frontendService.CreateTTSChunk(
+                        conversationItemId,                             // conversationItemId (consistent for all chunks)
+                        Convert.ToBase64String(chunk.AudioData),        // audioData as base64
+                        chunk.AssociatedText,                          // text
+                        chunk.ChunkIndex,                              // chunkIndex
+                        chunk.TotalChunks,                             // totalChunks
+                        0.0,                                           // durationMs (could be calculated if needed)
+                        "audio/mp3"                                    // audioFormat
+                    );
+                    
+                    // 🚀 IMMEDIATE SENDING: No waiting for other processes
+                    await _notificationService.SendFrontendTTSChunkAsync(connectionId, frontendTTSChunk);
+                    
+                    Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_CHUNK_SENT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous TTS chunk {chunkCount} sent successfully");
+                    _logger.LogTrace("🎵 Continuous TTS chunk sent: {Size} bytes", chunk.AudioData.Length);
+                }
+                
+                Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_NEURAL_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous Neural TTS completed, total chunks: {chunkCount}");
+            }
+            else
+            {
+                Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_STANDARD_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Using Standard TTS for continuous streaming");
+                // Fallback to standard TTS service with continuous streaming
+                _logger.LogInformation("🔊 Starting continuous Standard TTS: {Text} (Language: {Language})", text, language);
+                
+                // Use the standard TTS service's continuous streaming
+                await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
+                
+                Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_STANDARD_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous Standard TTS completed");
+            }
+
+            Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous TTS processing completed");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous TTS error: {ex.Message}");
+            _logger.LogError(ex, "❌ Error in continuous TTS processing for {ConnectionId}", connectionId);
+        }
+    }
+
+    /// <summary>
+    /// Parse speaker gender string to SpeakerGender enum
+    /// </summary>
+    private static SpeakerGender ParseSpeakerGender(string? genderString)
+    {
+        if (string.IsNullOrEmpty(genderString)) return SpeakerGender.Unknown;
+        
+        return genderString.ToLowerInvariant() switch
+        {
+            "male" or "m" => SpeakerGender.Male,
+            "female" or "f" => SpeakerGender.Female,
+            "nonbinary" or "nb" or "non-binary" => SpeakerGender.NonBinary,
+            _ => SpeakerGender.Unknown
+        };
     }
 
     public async Task CleanupConnection(string connectionId)
@@ -524,7 +774,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         await _sessionRepository.RemoveByConnectionIdAsync(connectionId, CancellationToken.None);
 
         if (session != null)
-            _speakerProfileManager.ClearSession(session.SessionId);
+            await _speakerManager.ClearSessionAsync(session.SessionId);
     }
 
     private async Task SaveConversationItemAsync(string sessionId, UtteranceWithContext utterance, dynamic genAIResponse) => await Task.CompletedTask;
@@ -549,7 +799,11 @@ public class ConversationState : IDisposable
     public string? LastSpeakerId { get; set; } // For Room Memory
     
     public string[] CandidateLanguages => new[] { PrimaryLanguage ?? "en-US", SecondaryLanguage ?? "en-GB" };
+    
+    // STRICT DESIGN: Only accept audio when Ready (new cycle) or actively receiving (before VAD timeout)
+    // Once VAD triggers ProcessingUtterance/SendingResponse, reject ALL new chunks until cycle completes
     public bool CanAcceptAudio => CycleState == ConversationPhase.Ready || CycleState == ConversationPhase.ReceivingAudio;
+    
     public bool ShouldStartNewCycle => CycleState == ConversationPhase.Ready;
     
     public ConversationState(string connectionId) => ConnectionId = connectionId;

@@ -1,36 +1,34 @@
 using A3ITranslator.Application.Models;
 
-namespace A3ITranslator.Application.Models.SpeakerProfiles;
+namespace A3ITranslator.Application.Models.Speaker;
 
 /// <summary>
-/// Session-scoped speaker profile with multi-language capabilities and "Linguistic DNA"
+/// Unified Speaker Profile - The single source of truth for "Flow C".
+/// Combines Acoustic DNA (Pitch/MFCC) and Linguistic DNA (GenAI insights).
 /// </summary>
 public class SpeakerProfile
 {
     public string SpeakerId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = "Unknown Speaker";
     public SpeakerGender Gender { get; set; } = SpeakerGender.Unknown;
-    public float Confidence { get; set; } = 0f; // 0-100%
+    public float Confidence { get; set; } = 0f; 
     public int TotalUtterances { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime LastActive { get; set; } = DateTime.UtcNow;
     
-    // Language capabilities with utterance-based percentages
-    public Dictionary<string, LanguageCapability> Languages { get; set; } = new();
+    // Physical DNA (Acoustic characteristics for identification)
+    public AudioFingerprint VoiceFingerprint { get; set; } = new();
     
-    // Audio characteristics (The "Fingerprint" - Physical DNA)
-    public AudioFingerprint? VoiceFingerprint { get; set; }
-    
-    // GenAI-derived insights (The "Personality" - Linguistic DNA)
+    // Linguistic DNA (GenAI-derived insights)
     public SpeakerInsights Insights { get; set; } = new();
 
-    // Context tracking
-    public bool IsLocked { get; set; } // When we are 80%+ sure, we lock to avoid flickering
-    public string? LastRole { get; set; }
-    
-    /// <summary>
-    /// Add utterance and update language statistics
-    /// </summary>
+    // Language capabilities
+    public Dictionary<string, LanguageCapability> Languages { get; set; } = new();
+    public string? PreferredLanguage { get; set; }
+
+    // Control flags
+    public bool IsLocked { get; set; } 
+
     public void AddUtterance(string language, float transcriptionConfidence)
     {
         TotalUtterances++;
@@ -56,49 +54,41 @@ public class SpeakerProfile
         
         RecalculateLanguagePercentages();
     }
-    
-    public void UpdateInsights(SpeakerInsights insights)
-    {
-        Insights = insights;
-        
-        if (!string.IsNullOrEmpty(insights.SuggestedName) && 
-            (DisplayName == "Unknown Speaker" || string.IsNullOrEmpty(DisplayName)))
-        {
-            DisplayName = insights.SuggestedName;
-        }
-        
-        if (insights.DetectedGender != SpeakerGender.Unknown)
-        {
-            Gender = insights.DetectedGender;
-        }
 
-        if (insights.AnalysisConfidence > 80f)
+    public void UpdateAcousticFeatures(float pitch, float[] mfcc)
+    {
+        // 90/10 Weighted Update for Stability (Centroid Sync)
+        const float HISTORY_WEIGHT = 0.9f;
+        const float NEW_WEIGHT = 0.1f;
+
+        VoiceFingerprint.AveragePitch = (VoiceFingerprint.AveragePitch * HISTORY_WEIGHT) + (pitch * NEW_WEIGHT);
+        
+        if (VoiceFingerprint.MfccVector.Length == mfcc.Length)
         {
-            IsLocked = true;
+             for(int i=0; i<mfcc.Length; i++)
+             {
+                 VoiceFingerprint.MfccVector[i] = (VoiceFingerprint.MfccVector[i] * HISTORY_WEIGHT) + (mfcc[i] * NEW_WEIGHT);
+             }
+        }
+        else if (VoiceFingerprint.MfccVector.Length == 0)
+        {
+            VoiceFingerprint.MfccVector = mfcc;
         }
     }
-    
-    public void UpdateLanguageUsage(string language, float confidence)
-    {
-        AddUtterance(language, confidence);
-    }
-    
+
     private void RecalculateLanguagePercentages()
     {
         if (TotalUtterances == 0) return;
-        
         foreach (var langCapability in Languages.Values)
         {
-            langCapability.UsagePercentage = 
-                (float)langCapability.UtteranceCount / TotalUtterances * 100f;
+            langCapability.UsagePercentage = (float)langCapability.UtteranceCount / TotalUtterances * 100f;
         }
     }
-    
+
     public string? GetDominantLanguage()
     {
-        return Languages.Values
-            .OrderByDescending(l => l.UsagePercentage)
-            .FirstOrDefault()?.Language;
+        return PreferredLanguage ?? 
+               Languages.OrderByDescending(l => l.Value.UsagePercentage).FirstOrDefault().Key;
     }
 }
 
@@ -111,33 +101,21 @@ public class LanguageCapability
     public DateTime LastUsed { get; set; } = DateTime.UtcNow;
 }
 
-/// <summary>
-/// Physical Audio DNA (MFCC/Pitch characteristics)
-/// </summary>
 public class AudioFingerprint
 {
     public float AveragePitch { get; set; }
-    public float SpeechRate { get; set; }
-    public float[] SpectralCentroid { get; set; } = Array.Empty<float>();
-    public string CharacteristicHash { get; set; } = string.Empty;
+    public float[] MfccVector { get; set; } = Array.Empty<float>();
     public float MatchConfidence { get; set; } = 0f;
 }
 
-/// <summary>
-/// Personality/Linguistic DNA derived from transcription
-/// </summary>
 public class SpeakerInsights
 {
     public string? SuggestedName { get; set; }
     public SpeakerGender DetectedGender { get; set; } = SpeakerGender.Unknown;
-    
-    // Linguistic DNA
-    public string? CommunicationStyle { get; set; } // Formal, Excited, Technical
+    public string? CommunicationStyle { get; set; } 
     public List<string> TypicalPhrases { get; set; } = new();
-    public string? AssignedRole { get; set; } // Host, Expert, Listener
-    public string? SentenceComplexity { get; set; } // Simple, Sophisticated
-    public string? TurnContext { get; set; } // "Answering Sarah", "Initiating Topic"
-
+    public string? AssignedRole { get; set; } 
+    public string? TurnContext { get; set; }
     public float AnalysisConfidence { get; set; } = 0f;
     public DateTime LastAnalyzed { get; set; } = DateTime.UtcNow;
 }

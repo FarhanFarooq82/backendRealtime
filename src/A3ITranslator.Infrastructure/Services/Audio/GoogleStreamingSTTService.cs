@@ -331,14 +331,14 @@ public GoogleStreamingSTTService(
 
         var config = new RecognitionConfig
         {
-            LanguageCodes = { candidateLanguages.FirstOrDefault() ?? "en-US" },
+            // 🌍 ENABLE TRUE AUTO-DETECTION: Add all candidate languages
+            LanguageCodes = { candidateLanguages.FirstOrDefault() }, // Multiple languages for auto-detection
 
             ExplicitDecodingConfig = new ExplicitDecodingConfig
             {
                 Encoding = ExplicitDecodingConfig.Types.AudioEncoding.WebmOpus,
                 SampleRateHertz = 48000,
                 AudioChannelCount = 1
-
             }
         };
 
@@ -373,6 +373,10 @@ public GoogleStreamingSTTService(
                         Audio = ByteString.CopyFrom(chunk)
                     });
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error while sending audio chunks to Google STT.");
             }
             finally
             {

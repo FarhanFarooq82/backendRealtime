@@ -29,8 +29,6 @@ public class TTSEventHandler : INotificationHandler<TranslationCompleted>
 
         try
         {
-            _logger.LogInformation("🗣️ Starting TTS for Connection {ConnectionId} - Text: {Text}", connectionId, text);
-
             var sentences = SplitIntoSentences(text);
 
             foreach (var sentence in sentences)
@@ -52,10 +50,6 @@ public class TTSEventHandler : INotificationHandler<TranslationCompleted>
                 }
             }
             
-            // Notify transaction complete (Old logic did this at end of orchestrator)
-            // Ideally, we should have a TransactionCompleted event? 
-            // Or just do it here as it is the "End of the Line".
-            await _notificationService.NotifyTransactionCompleteAsync(connectionId);
         }
         catch (Exception ex)
         {

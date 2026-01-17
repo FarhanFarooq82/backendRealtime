@@ -1,4 +1,4 @@
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 
 namespace A3ITranslator.Application.DTOs.Translation;
 
@@ -14,6 +14,6 @@ public class EnhancedTranslationRequest
     public string SessionId { get; set; } = string.Empty;
     public bool TriggerDetected { get; set; }
     public string? DetectedTrigger { get; set; }
-    public SpeakerInfo? SpeakerInfo { get; set; }
+    public SpeakerProfile? SpeakerInfo { get; set; }
     public Dictionary<string, object>? SessionContext { get; set; }
 }

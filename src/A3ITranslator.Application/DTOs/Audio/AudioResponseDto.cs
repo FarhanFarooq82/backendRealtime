@@ -1,4 +1,4 @@
-using A3ITranslator.Application.DTOs.Speaker;
+
 using A3ITranslator.Application.DTOs.GenAI;
 
 namespace A3ITranslator.Application.DTOs.Audio;

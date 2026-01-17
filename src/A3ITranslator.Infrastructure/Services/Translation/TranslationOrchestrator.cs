@@ -1,6 +1,6 @@
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.DTOs.Translation;
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Diagnostics;
@@ -66,6 +66,64 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         {
             _logger.LogError(ex, "Failed to process translation for: {Text}", request.Text);
             return CreateFallbackResponse(request, $"Translation processing failed: {ex.Message}", stopwatch.Elapsed);
+        }
+    }
+
+    /// <summary>
+    /// NEW: Process enhanced translation with structured response for maximum performance
+    /// Returns new structured format that routes different data to different services
+    /// </summary>
+    public async Task<EnhancedTranslationResponse> ProcessEnhancedTranslationAsync(EnhancedTranslationRequest request)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        
+        try
+        {
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_START: {DateTime.UtcNow:HH:mm:ss.fff} - Starting ENHANCED translation processing");
+            _logger.LogInformation("🚀 Starting ENHANCED translation processing for: {Text}", request.Text);
+
+            // Build comprehensive prompts using the prompt service
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_PROMPT_BUILD_START: {DateTime.UtcNow:HH:mm:ss.fff} - Building translation prompts");
+            var (systemPrompt, userPrompt) = _promptService.BuildTranslationPrompts(request);
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_PROMPT_BUILD_END: {DateTime.UtcNow:HH:mm:ss.fff} - Prompts built: System {systemPrompt.Length} chars, User {userPrompt.Length} chars");
+
+            _logger.LogDebug("Generated prompts - System: {SystemLength} chars, User: {UserLength} chars",
+                systemPrompt.Length, userPrompt.Length);
+
+            // Get response from GenAI service
+            Console.WriteLine($"TIMESTAMP_GENAI_SERVICE_CALL_START: {DateTime.UtcNow:HH:mm:ss.fff} - Calling GenAI service");
+            var rawResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            Console.WriteLine($"TIMESTAMP_GENAI_SERVICE_CALL_END: {DateTime.UtcNow:HH:mm:ss.fff} - GenAI service responded: {rawResponse?.Length ?? 0} chars");
+
+            _logger.LogDebug("Received GenAI response: {ResponseLength} chars", rawResponse?.Length ?? 0);
+
+            if (string.IsNullOrWhiteSpace(rawResponse))
+            {
+                Console.WriteLine($"TIMESTAMP_TRANSLATION_EMPTY_RESPONSE: {DateTime.UtcNow:HH:mm:ss.fff} - GenAI returned empty response");
+                _logger.LogWarning("GenAI service returned empty response");
+                return CreateEnhancedFallbackResponse(request, "GenAI service returned empty response", stopwatch.Elapsed);
+            }
+
+            // Parse the new structured JSON response
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_PARSE_START: {DateTime.UtcNow:HH:mm:ss.fff} - Parsing enhanced JSON response");
+            var response = await ParseEnhancedGenAIResponseAsync(rawResponse, request);
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_PARSE_END: {DateTime.UtcNow:HH:mm:ss.fff} - Enhanced JSON parsed successfully");
+            
+            // Set processing metadata
+            response.ProcessingTimeMs = stopwatch.Elapsed.TotalMilliseconds;
+            response.ProviderUsed = _genAIService.GetServiceName();
+
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - Enhanced translation completed in {stopwatch.Elapsed.TotalMilliseconds}ms");
+            _logger.LogInformation("✅ Enhanced translation completed in {ProcessingTime}ms - Intent: {Intent}, Speaker Decision: {SpeakerDecision}",
+                stopwatch.Elapsed.TotalMilliseconds, response.Intent, response.SpeakerIdentification.Decision);
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"TIMESTAMP_TRANSLATION_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - Enhanced translation failed: {ex.Message}");
+            _logger.LogError(ex, "❌ Failed to process enhanced translation for: {Text}", request.Text);
+            return CreateEnhancedFallbackResponse(request, $"Enhanced translation processing failed: {ex.Message}", stopwatch.Elapsed);
         }
     }
 
@@ -425,6 +483,171 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             ErrorType = TranslationErrorType.ServiceUnavailable,
             ProcessingTimeMs = processingTime.TotalMilliseconds,
             Reasoning = "Fallback response due to processing error"
+        };
+    }
+
+    /// <summary>
+    /// Parse the new structured JSON response format that matches our prompt exactly
+    /// </summary>
+    private async Task<EnhancedTranslationResponse> ParseEnhancedGenAIResponseAsync(string rawResponse, EnhancedTranslationRequest request)
+    {
+        await Task.CompletedTask;
+        try
+        {
+            var cleanedResponse = CleanJsonResponse(rawResponse);
+            _logger.LogDebug("🔍 Parsing enhanced JSON: {CleanedResponse}", cleanedResponse);
+            
+            using var document = JsonDocument.Parse(cleanedResponse);
+            var root = document.RootElement;
+
+            var response = new EnhancedTranslationResponse
+            {
+                Success = true,
+                // Core translation data
+                ImprovedTranscription = GetStringProperty(root, "improvedTranscription") ?? request.Text,
+                Translation = GetStringProperty(root, "translation") ?? request.Text,
+                Intent = GetStringProperty(root, "intent") ?? "SIMPLE_TRANSLATION",
+                TranslationLanguage = GetStringProperty(root, "translationLanguage") ?? request.TargetLanguage,
+                AudioLanguage = GetStringProperty(root, "audioLanguage") ?? request.SourceLanguage ?? "unknown",
+                Confidence = GetFloatProperty(root, "confidence") ?? 0.5f,
+                Reasoning = GetStringProperty(root, "reasoning") ?? "Processed successfully"
+            };
+
+            // Parse speaker identification
+            if (root.TryGetProperty("speakerIdentification", out var speakerIdElement))
+            {
+                response.SpeakerIdentification = new SpeakerIdentificationResult
+                {
+                    Decision = GetStringProperty(speakerIdElement, "decision") ?? "UNCERTAIN",
+                    FinalSpeakerId = GetStringProperty(speakerIdElement, "finalSpeakerId"),
+                    Confidence = GetFloatProperty(speakerIdElement, "confidence") ?? 0f,
+                    Reasoning = GetStringProperty(speakerIdElement, "reasoning") ?? "No analysis available"
+                };
+
+                // Parse similarity scores if available
+                if (speakerIdElement.TryGetProperty("similarityScores", out var scoresElement) && scoresElement.ValueKind == JsonValueKind.Array)
+                {
+                    var scores = new List<SpeakerSimilarityScore>();
+                    foreach (var scoreElement in scoresElement.EnumerateArray())
+                    {
+                        scores.Add(new SpeakerSimilarityScore
+                        {
+                            SpeakerId = GetStringProperty(scoreElement, "speakerId") ?? "unknown",
+                            Score = GetFloatProperty(scoreElement, "score") ?? 0f
+                        });
+                    }
+                    response.SpeakerIdentification.SimilarityScores = scores;
+                }
+            }
+
+            // Parse speaker profile update
+            if (root.TryGetProperty("speakerProfileUpdate", out var profileElement))
+            {
+                response.SpeakerProfileUpdate = new SpeakerProfileUpdateData
+                {
+                    SpeakerId = GetStringProperty(profileElement, "speakerId"),
+                    Tone = GetStringProperty(profileElement, "tone"),
+                    SuggestedName = GetStringProperty(profileElement, "suggestedName"),
+                    EstimatedGender = GetStringProperty(profileElement, "estimatedGender"),
+                    VoiceCharacteristics = GetStringProperty(profileElement, "voiceCharacteristics"),
+                    CommunicationStyle = GetStringProperty(profileElement, "communicationStyle"),
+                    LanguageComplexity = GetStringProperty(profileElement, "languageComplexity"),
+                    TurnContext = GetStringProperty(profileElement, "turnContext"),
+                    PreferredLanguage = GetStringProperty(profileElement, "preferredLanguage"),
+                    ProfileConfidence = GetFloatProperty(profileElement, "confidence") ?? 0f
+                };
+
+                // Parse vocabulary array
+                if (profileElement.TryGetProperty("newVocabulary", out var vocabElement) && vocabElement.ValueKind == JsonValueKind.Array)
+                {
+                    response.SpeakerProfileUpdate.NewVocabulary = vocabElement.EnumerateArray()
+                        .Select(v => v.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToList();
+                }
+
+                // Parse typical phrases array
+                if (profileElement.TryGetProperty("typicalPhrases", out var phrasesElement) && phrasesElement.ValueKind == JsonValueKind.Array)
+                {
+                    response.SpeakerProfileUpdate.TypicalPhrases = phrasesElement.EnumerateArray()
+                        .Select(v => v.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToList();
+                }
+            }
+
+            // Parse AI assistance
+            if (root.TryGetProperty("aiAssistance", out var aiElement))
+            {
+                response.AIAssistance = new AIAssistanceData
+                {
+                    TriggerDetected = GetBoolProperty(aiElement, "triggerDetected"),
+                    Response = GetStringProperty(aiElement, "response"),
+                    ResponseTranslated = GetStringProperty(aiElement, "responseTranslated"),
+                    ResponseLanguage = GetStringProperty(aiElement, "responseLanguage")
+                };
+            }
+
+            // Parse fact extraction
+            if (root.TryGetProperty("factExtraction", out var factElement))
+            {
+                response.FactExtraction = new FactExtractionPayload
+                {
+                    RequiresFactExtraction = GetBoolProperty(factElement, "requiresFactExtraction"),
+                    Confidence = GetFloatProperty(factElement, "confidence") ?? 0f
+                };
+
+                // Parse facts array
+                if (factElement.TryGetProperty("facts", out var factsElement) && factsElement.ValueKind == JsonValueKind.Array)
+                {
+                    response.FactExtraction.Facts = factsElement.EnumerateArray()
+                        .Select(f => f.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToList();
+                }
+            }
+
+            _logger.LogDebug("✅ Successfully parsed enhanced response with speaker ID: {SpeakerDecision}, AI trigger: {AITrigger}, Facts: {FactCount}", 
+                response.SpeakerIdentification.Decision,
+                response.AIAssistance.TriggerDetected,
+                response.FactExtraction.Facts.Count);
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to parse enhanced GenAI JSON response");
+            return CreateEnhancedFallbackResponse(request, $"JSON parsing failed: {ex.Message}", TimeSpan.Zero);
+        }
+    }
+
+    /// <summary>
+    /// Create enhanced fallback response when processing fails
+    /// </summary>
+    private EnhancedTranslationResponse CreateEnhancedFallbackResponse(EnhancedTranslationRequest request, string errorMessage, TimeSpan processingTime)
+    {
+        _logger.LogWarning("Creating enhanced fallback response: {Error}", errorMessage);
+
+        return new EnhancedTranslationResponse
+        {
+            Success = false,
+            ErrorMessage = errorMessage,
+            ProcessingTimeMs = processingTime.TotalMilliseconds,
+            ProviderUsed = "fallback",
+            
+            // Core translation fallback
+            ImprovedTranscription = request.Text,
+            Translation = request.Text, // No translation available
+            Intent = "SIMPLE_TRANSLATION",
+            TranslationLanguage = request.TargetLanguage ?? "en-US",
+            AudioLanguage = request.SourceLanguage ?? "unknown",
+            Confidence = 0.1f,
+            Reasoning = $"Fallback response: {errorMessage}",
+            
+            // Empty structured data
+            SpeakerIdentification = new SpeakerIdentificationResult 
+            { 
+                Decision = "UNCERTAIN", 
+                Confidence = 0f, 
+                Reasoning = "Processing failed - no speaker analysis" 
+            },
+            SpeakerProfileUpdate = new SpeakerProfileUpdateData { ProfileConfidence = 0f },
+            AIAssistance = new AIAssistanceData { TriggerDetected = false },
+            FactExtraction = new FactExtractionPayload { RequiresFactExtraction = false, Confidence = 0f }
         };
     }
 }

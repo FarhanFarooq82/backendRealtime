@@ -1,3 +1,4 @@
+using A3ITranslator.Application.Services.Frontend;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 
@@ -10,6 +11,9 @@ public static class ApplicationServiceRegistration
         services.AddMediatR(cfg => {
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
+
+        // Frontend services (Singleton for use with Singleton orchestrators)
+        services.AddSingleton<IFrontendConversationItemService, FrontendConversationItemService>();
 
         // Future: Add Validators, Behaviors here
 

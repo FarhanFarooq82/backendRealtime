@@ -1,5 +1,5 @@
 using A3ITranslator.Application.DTOs.Audio;
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 
 namespace A3ITranslator.Application.DTOs.Common;
 
@@ -32,7 +32,7 @@ public class ConversationItem
     /// <summary>
     /// Speaker information who provided the original text
     /// </summary>
-    public SpeakerInfo Speaker { get; set; } = new();
+    public SpeakerProfile Speaker { get; set; } = new();
 
     /// <summary>
     /// Type of response generated (Translation, AI Assistant, System)

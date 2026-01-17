@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using A3ITranslator.Application.Services;
 using A3ITranslator.Infrastructure.Configuration;
+using A3ITranslator.Application.Models.Speaker;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -52,6 +53,16 @@ public class AzureStreamingTTSService : IStreamingTTSService
         if (!string.IsNullOrEmpty(voiceName))
         {
             config.SpeechSynthesisVoiceName = voiceName;
+        }
+        else
+        {
+            // Auto-select standard voice for cost optimization
+            var selectedVoice = AzureNeuralVoiceService.SelectOptimalVoice(language, SpeakerGender.Female, isPremium: false);
+            if (selectedVoice != null)
+            {
+                config.SpeechSynthesisVoiceName = selectedVoice;
+                _logger.LogInformation("🎭 Selected standard voice: {Voice} for language: {Language}", selectedVoice, language);
+            }
         }
 
         // ✅ Set output format for streaming

@@ -1,5 +1,5 @@
-using A3ITranslator.Application.DTOs.Speaker;
 using A3ITranslator.Application.DTOs.Common;
+using A3ITranslator.Application.DTOs.Frontend;
 
 namespace A3ITranslator.Application.Interfaces; // Changed namespace
 
@@ -11,7 +11,6 @@ public interface IHubClient
     Task ReceiveTranscription(string text, string language, bool isFinal);
     Task ReceiveAudioChunk(string base64Chunk);
     Task ReceiveTranslation(string text, string language, bool isFinal);
-    Task ReceiveSpeakerUpdate(SpeakerListUpdate speakerUpdate);
     Task ReceiveTransactionComplete();
     Task ReceiveError(string message);
     
@@ -80,4 +79,20 @@ public interface IHubClient
     /// Receive cycle completion - frontend can start next audio cycle
     /// </summary>
     Task ReceiveCycleCompletion(bool readyForNext);
+
+    // ✅ NEW: Frontend-specific simplified DTOs
+    /// <summary>
+    /// Receive simplified speaker list update for frontend display
+    /// </summary>
+    Task ReceiveFrontendSpeakerList(FrontendSpeakerListUpdate speakerList);
+
+    /// <summary>
+    /// Receive simplified conversation item for frontend display
+    /// </summary>
+    Task ReceiveFrontendConversationItem(FrontendConversationItem conversationItem);
+
+    /// <summary>
+    /// Receive TTS audio chunk for frontend playback
+    /// </summary>
+    Task ReceiveFrontendTTSChunk(FrontendTTSChunk ttsChunk);
 }

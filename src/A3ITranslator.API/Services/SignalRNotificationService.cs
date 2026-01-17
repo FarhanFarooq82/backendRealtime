@@ -1,6 +1,7 @@
 using A3ITranslator.Application.Services;
-using A3ITranslator.Application.DTOs.Speaker;
+
 using A3ITranslator.Application.DTOs.Common;
+using A3ITranslator.Application.DTOs.Frontend;
 using A3ITranslator.Application.Interfaces;
 using A3ITranslator.API.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -25,17 +26,11 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task NotifyErrorAsync(string connectionId, string message) =>
         _hubContext.Clients.Client(connectionId).ReceiveError(message);
 
-    public Task NotifyLanguageDetectedAsync(string connectionId, string language) =>
-        _hubContext.Clients.Client(connectionId).ReceiveDominantLanguageDetected(language);
-
     public Task NotifyAudioChunkAsync(string connectionId, string base64Audio) =>
-        _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(base64Audio);
+    _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(base64Audio);
 
     public Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal) =>
         _hubContext.Clients.Client(connectionId).ReceiveTranslation(text, language, isFinal);
-
-    public Task NotifySpeakerUpdateAsync(string connectionId, SpeakerListUpdate speakerUpdate) =>
-        _hubContext.Clients.Client(connectionId).ReceiveSpeakerUpdate(speakerUpdate);
 
     public Task NotifyTransactionCompleteAsync(string connectionId) =>
         _hubContext.Clients.Client(connectionId).ReceiveTransactionComplete();
@@ -87,4 +82,14 @@ public class SignalRNotificationService : IRealtimeNotificationService
 
     public Task NotifyCycleCompletionAsync(string connectionId, bool readyForNext) =>
         _hubContext.Clients.Client(connectionId).ReceiveCycleCompletion(readyForNext);
+
+    // ✅ NEW: Frontend-specific simplified DTOs
+    public Task SendFrontendSpeakerListAsync(string connectionId, FrontendSpeakerListUpdate speakerList) =>
+        _hubContext.Clients.Client(connectionId).ReceiveFrontendSpeakerList(speakerList);
+
+    public Task SendFrontendConversationItemAsync(string connectionId, FrontendConversationItem conversationItem) =>
+        _hubContext.Clients.Client(connectionId).ReceiveFrontendConversationItem(conversationItem);
+
+    public Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk) =>
+        _hubContext.Clients.Client(connectionId).ReceiveFrontendTTSChunk(ttsChunk);
 }

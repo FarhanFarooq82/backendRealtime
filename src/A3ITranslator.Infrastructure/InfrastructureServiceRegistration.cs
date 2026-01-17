@@ -1,5 +1,6 @@
 using A3ITranslator.Application.Domain.Interfaces;
 using A3ITranslator.Application.Orchestration;
+using A3ITranslator.Application.Services;
 using A3ITranslator.Application.Services.Speaker;
 using A3ITranslator.Infrastructure.Persistence.Repositories;
 using A3ITranslator.Infrastructure.Services.Orchestration;
@@ -15,9 +16,9 @@ public static class InfrastructureServiceRegistration
         // Persistence
         services.AddSingleton<ISessionRepository, InMemorySessionRepository>();
 
-        // Speaker Management Services
-        services.AddSingleton<ISpeakerDecisionEngine, SpeakerDecisionEngine>();
-        services.AddSingleton<ISpeakerProfileManager, SpeakerProfileManager>();
+        // Speaker Management Services (Unified Pattern)
+        services.AddSingleton<ISpeakerManagementService, SpeakerManagementService>();
+        services.AddSingleton<DataRouterService>();
 
         // Conversation Orchestration
         services.AddSingleton<IConversationOrchestrator, ConversationOrchestrator>();

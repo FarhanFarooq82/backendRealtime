@@ -1,7 +1,7 @@
 using A3ITranslator.Application.Models;
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.DTOs.Translation;
-using A3ITranslator.Application.Models.SpeakerProfiles;
+using A3ITranslator.Application.Models.Speaker;
 using Microsoft.Extensions.Logging;
 
 namespace A3ITranslator.Infrastructure.Services.Audio;

@@ -3,9 +3,9 @@ using System.Text.Json;
 using A3ITranslator.Application.DTOs.Translation;
 using A3ITranslator.Application.Models;
 using A3ITranslator.Application.Services;
-using A3ITranslator.Application.DTOs.Speaker;
 using A3ITranslator.Application.Domain.Entities;
 using Microsoft.Extensions.Logging;
+using A3ITranslator.Application.Models.Speaker;
 using ServiceConversationTurn = A3ITranslator.Application.Services.ConversationTurn;
 
 namespace A3ITranslator.Infrastructure.Services;
@@ -40,7 +40,7 @@ public class StreamingTranslationOrchestrator : IStreamingTranslationOrchestrato
     public async Task<StreamingTranslationResult> ProcessStreamingTranslationAsync(
         string sessionId, 
         string transcriptionText, 
-        SpeakerInfo speakerInfo, 
+        SpeakerProfile speakerInfo, 
         ConversationSession sessionContext)
     {
         var operationId = Guid.NewGuid().ToString();
@@ -157,8 +157,6 @@ public class StreamingTranslationOrchestrator : IStreamingTranslationOrchestrato
                     _logger.LogInformation("🎯 Detected response type: {ResponseType} for session {SessionId}", 
                         detectedResponseType, sessionId);
 
-                    // Notify frontend of response type
-                    await _notificationService.SendResponseTypeAsync(sessionId, detectedResponseType);
                 }
 
                 // Check for complete phrases (sentences or meaningful chunks)
@@ -265,6 +263,7 @@ public class StreamingTranslationOrchestrator : IStreamingTranslationOrchestrato
             
             // Don't await - let TTS run in parallel
             _ = Task.Run(() => ttsTask, cancellationToken);
+            await Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -377,116 +376,5 @@ public class StreamingTranslationOrchestrator : IStreamingTranslationOrchestrato
         {
             return phrase;
         }
-    }
-
-    public async Task<ConversationHistoryUpdate> FinalizeTranslationCycleAsync(string sessionId)
-    {
-        try
-        {
-            _logger.LogInformation("🏁 Finalizing translation cycle for session {SessionId}", sessionId);
-
-            StringBuilder? accumulator;
-            lock (_operationsLock)
-            {
-                _streamAccumulators.TryGetValue(sessionId, out accumulator);
-                _streamAccumulators.Remove(sessionId);
-            }
-
-            if (accumulator == null || accumulator.Length == 0)
-            {
-                _logger.LogWarning("⚠️ No accumulated content to finalize for session {SessionId}", sessionId);
-                return new ConversationHistoryUpdate
-                {
-                    SessionId = sessionId,
-                    IsReadyForNextCycle = true
-                };
-            }
-
-            var finalResponse = accumulator.ToString();
-            
-            // Parse the complete JSON response
-            var translationResult = ParseFinalTranslationResponse(finalResponse);
-            
-            // Create conversation turn from notification service types
-            var conversationTurn = new ServiceConversationTurn
-            {
-                TurnId = Guid.NewGuid().ToString(),
-                Timestamp = DateTime.UtcNow,
-                OriginalText = translationResult.OriginalText ?? "",
-                TranslatedText = translationResult.TranslatedText ?? "",
-                ResponseType = ResponseType.DirectTranslation,
-                Speaker = new SpeakerInfo() // Placeholder
-            };
-
-            // Send final conversation data to frontend
-            await _notificationService.SendConversationHistoryAsync(sessionId, new ConversationHistoryData
-            {
-                ConversationTurn = conversationTurn,
-                ExtractedFacts = translationResult.Facts,
-                SpeakerAnalysis = new SpeakerInfo(), // Placeholder
-                IsTransactionComplete = true
-            });
-
-            // Send cycle completion signal
-            await _notificationService.SendCycleCompletionAsync(sessionId, true);
-
-            _logger.LogInformation("✅ Translation cycle finalized for session {SessionId}", sessionId);
-
-            return new ConversationHistoryUpdate
-            {
-                SessionId = sessionId,
-                ExtractedFacts = translationResult.Facts,
-                IsReadyForNextCycle = true
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Error finalizing translation cycle for session {SessionId}", sessionId);
-            return new ConversationHistoryUpdate
-            {
-                SessionId = sessionId,
-                IsReadyForNextCycle = true // Allow next cycle even if finalization failed
-            };
-        }
-    }
-
-    private TranslationResult ParseFinalTranslationResponse(string jsonResponse)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<TranslationResult>(jsonResponse, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            }) ?? new TranslationResult();
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "❌ Failed to parse final JSON response: {Response}", jsonResponse);
-            
-            // Fallback parsing for partial responses
-            return new TranslationResult
-            {
-                TranslatedText = ExtractTranslationFromPhrase(jsonResponse),
-                OriginalText = "Error parsing response",
-                Facts = new List<SessionFact>()
-            };
-        }
-    }
-
-    public async Task CancelStreamingAsync(string sessionId)
-    {
-        lock (_operationsLock)
-        {
-            if (_activeOperations.TryGetValue(sessionId, out var operation))
-            {
-                operation.Cancel();
-                _activeOperations.Remove(sessionId);
-                _streamAccumulators.Remove(sessionId);
-                
-                _logger.LogInformation("🛑 Cancelled streaming operation for session {SessionId}", sessionId);
-            }
-        }
-
-        await _notificationService.SendOperationCancelledAsync(sessionId);
     }
 }

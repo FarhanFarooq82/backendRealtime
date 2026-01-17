@@ -1,4 +1,4 @@
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 
 namespace A3ITranslator.Application.DTOs.Translation;
 
@@ -20,7 +20,7 @@ public class TranslationResponse
     public string? AudioLanguage { get; set; }
     public string? TranslationLanguage { get; set; }
     public string? SpeakerAcknowledged { get; set; }
-    public SpeakerInfo? SpeakerInfo { get; set; }
+    public SpeakerProfile? SpeakerInfo { get; set; }
     public double ProcessingTimeMs { get; set; }
     
     // Legacy speaker analysis properties (for backward compatibility)

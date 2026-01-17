@@ -1,6 +1,6 @@
 using A3ITranslator.Application.DTOs.Translation;
 using A3ITranslator.Application.Models;
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 using A3ITranslator.Application.Domain.Entities;
 
 namespace A3ITranslator.Application.Services;
@@ -18,18 +18,10 @@ public interface IStreamingTranslationOrchestrator
     Task<StreamingTranslationResult> ProcessStreamingTranslationAsync(
         string sessionId, 
         string transcriptionText, 
-        SpeakerInfo speakerInfo, 
+        SpeakerProfile speakerInfo, 
         ConversationSession sessionContext);
 
-    /// <summary>
-    /// Handles the finalization and conversation history update
-    /// </summary>
-    Task<ConversationHistoryUpdate> FinalizeTranslationCycleAsync(string sessionId);
-
-    /// <summary>
-    /// Cancels active streaming operation (for interruptions)
-    /// </summary>
-    Task CancelStreamingAsync(string sessionId);
+ 
 }
 
 public class StreamingTranslationResult

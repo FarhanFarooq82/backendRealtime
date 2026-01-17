@@ -93,7 +93,7 @@ public class LanguageDetectionService : ILanguageDetectionService
         var speaker = session.Speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
         if (speaker != null)
         {
-            speaker.UpdateLanguageUsage(language, 1.0f); // Set as 100% usage for this update
+            speaker.AddUtterance(language, 1.0f); // Set as 100% usage for this update
             _logger.LogInformation("💾 Updated language {Language} for speaker {SpeakerId}", 
                 language, speakerId);
         }

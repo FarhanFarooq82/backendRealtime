@@ -1,7 +1,7 @@
 using MediatR;
 using A3ITranslator.Application.Domain.Enums;
 using A3ITranslator.Application.Domain.Events;
-using A3ITranslator.Application.Models.SpeakerProfiles;
+using A3ITranslator.Application.Models.Speaker;
 using System.Linq;
 
 namespace A3ITranslator.Application.Domain.Entities;

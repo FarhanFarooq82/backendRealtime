@@ -1,3 +1,5 @@
+using A3ITranslator.Application.Models.Speaker;
+
 namespace A3ITranslator.Application.DTOs.Common;
 
 /// <summary>
@@ -38,7 +40,7 @@ public class EnhancedConversationItem
     /// <summary>
     /// Enhanced speaker information with detailed confidence metrics
     /// </summary>
-    public Speaker.EnhancedSpeakerInfo Speaker { get; set; } = new();
+    public SpeakerProfile Speaker { get; set; } = new();
 
     /// <summary>
     /// Detailed confidence metrics for all processing stages

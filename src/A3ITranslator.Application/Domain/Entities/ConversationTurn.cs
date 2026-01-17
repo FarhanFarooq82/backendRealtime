@@ -37,4 +37,17 @@ public class ConversationTurn
             Timestamp = DateTime.UtcNow
         };
     }
+
+    public ConversationTurn SetMetadata(string key, object value)
+    {
+        Metadata[key] = value;
+        return this;
+    }
+
+    public ConversationTurn SetTranslation(string translatedText, string targetLanguage)
+    {
+        TranslatedText = translatedText;
+        TargetLanguage = targetLanguage;
+        return this;
+    }
 }

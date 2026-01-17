@@ -1,5 +1,6 @@
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.DTOs.Translation;
+using A3ITranslator.Application.Services.Speaker;
 using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json;
@@ -12,15 +13,19 @@ namespace A3ITranslator.Infrastructure.Services.Translation;
 public class TranslationPromptService : ITranslationPromptService
 {
     private readonly ILogger<TranslationPromptService> _logger;
+    private readonly ISpeakerManagementService _speakerService;
 
-    public TranslationPromptService(ILogger<TranslationPromptService> logger)
+    public TranslationPromptService(
+        ILogger<TranslationPromptService> logger,
+        ISpeakerManagementService speakerService)
     {
         _logger = logger;
+        _speakerService = speakerService;
     }
 
     public (string systemPrompt, string userPrompt) BuildTranslationPrompts(EnhancedTranslationRequest request)
     {
-        var systemPrompt = BuildSystemPrompt(request.TargetLanguage);
+        var systemPrompt = BuildSystemPrompt(request.SourceLanguage, request.TargetLanguage);
         var userPrompt = BuildUserPrompt(request);
         
         _logger.LogDebug("Built translation prompts for {SourceLang} -> {TargetLang}",
@@ -29,107 +34,84 @@ public class TranslationPromptService : ITranslationPromptService
         return (systemPrompt, userPrompt);
     }
 
-    private string BuildSystemPrompt(string targetLanguage)
+    private string BuildSystemPrompt(string primaryLang, string secondaryLang)
     {
-        return $@"You are an advanced AI assistant specialized in multilingual communication, cultural adaptation, and SPEAKER IDENTIFICATION. You are currently acting as a highly observant Meeting Secretary for a group of 2-10 people.
+        return $@"You are the **Main Intelligence Core** for a sophisticated real-time meeting assistant.
 
-**Core Capabilities:**
-- Advanced transcription improvement with cultural context awareness
-- Nuanced translation that preserves meaning, tone, and cultural nuances
-- **SPEAKER IDENTIFICATION**: Using voice characteristics + linguistic DNA to identify speakers
-- **Micro-Context Tracking**: Knowing who is talking to whom based on turn-taking cues
-- Intent classification for determining AI assistance needs
-- Fact extraction for knowledge management
+**OFFICIAL INPUT DATA STRUCTURE:**
+You will receive a user message containing:
+1. **Current Utterance**: The text to process.
+2. **Acoustic Scorecard**: Mathematical similarity scores (0-100%) against known speakers.
+3. **Speaker Context**: Profiles of known speakers (Style, Vocabulary).
+4. **Conversation History**: The last 5 turns for context.
+5. **Language Routing**: The active primary and secondary languages.
 
-**SPEAKER IDENTIFICATION PROCESS:**
-1. Analyze voice characteristics (pitch, speech rate, energy)
-2. Extract linguistic DNA (communication style, phrases, complexity)
-3. Compare against known speakers in session
-4. Make confident decision on speaker identity
-5. Confidence thresholds: >80% = Confident, 70-80% = Probable, <70% = Uncertain
+**YOUR CORE RESPONSIBILITIES (Execute in Order):**
 
-**Language Requirements:**
-- Source Language: Auto-detect from input
-- Target Language: {targetLanguage}
+1. 🕵️ **IDENTITY JUDGE (Priority #1)**:
+   - **Goal**: definitive identification of the speaker.
+   - **Input**: Use the 'Acoustic Scorecard' (Hard Evidence) + 'Conversation History' (Flow) + 'Linguistic Style' (Soft Evidence).
+   - **Logic**:
+     - *High Acoustic Score (>80%)* + *Context Fits* -> **CONFIRM_EXISTING**
+     - *Low Acoustic Score* + *Context Mismatch* -> **NEW_SPEAKER**
+     - *Ambiguous Acoustic*: Trust the **Conversation Flow** (Who was asked a question?) and **Style** (Who uses these words?).
 
-**Response Format:**
-You must return a valid JSON object with this exact structure:
+2. 🌐 **TRANSLATION & ROUTING**:
+   - Detect the input language.
+   - **Routing Rule**: 
+     - If {primaryLang} -> Translate to {secondaryLang}.
+     - If {secondaryLang} -> Translate to {primaryLang}.
+     - Else -> Translate to {primaryLang}.
+   - **Output**: Provide natural, distinct translations.
 
+3. 🧠 **INTENT & AI ASSISTANCE**:
+   - **Intent**: 'SIMPLE_TRANSLATION' (Default) vs 'AI_ASSISTANCE' (User asks YOU for help).
+   - **Trigger**: Only specific calls like ""Assistant, what did he say?"" or ""Translator, clarify that.""
+   - **Action**: If triggered, provide a concise, helpful response in `aiAssistance`.
+
+4. 📝 **FACT EXTRACTION**:
+   - Extract strictly factual data: Dates, Deadlines, Names, Key Decisions.
+   - Ignore small talk.
+
+**STRICT JSON OUTPUT FORMAT**:
 ```json
 {{
-  ""improvedTranscription"": ""Enhanced, grammatically correct transcription"",
-  ""translation"": ""Natural translation in {targetLanguage}"",
-  ""intent"": ""SIMPLE_TRANSLATION or AI_ASSISTANCE"",
-  ""translationLanguage"": ""BCP-47 language code for translation"",
-  ""aiAssistanceConfirmed"": false,
-  ""aiResponse"": null,
-  ""aiResponseTranslated"": null,
-  ""confidence"": 0.95,
-  ""audioLanguage"": ""detected source language BCP-47 code"",
-  ""reasoning"": ""Brief explanation of analysis and speaker decision"",
+  ""improvedTranscription"": ""Cleaned text (no stutter)"",
+  ""translation"": ""Target language translation"",
+  ""intent"": ""SIMPLE_TRANSLATION"" | ""AI_ASSISTANCE"",
+  ""translationLanguage"": ""Target BCP-47"",
+  ""audioLanguage"": ""Detected Source BCP-47"",
+  ""confidence"": 0.98,
   
   ""speakerIdentification"": {{
-    ""decision"": ""EXISTING_SPEAKER"" | ""NEW_SPEAKER"" | ""UNCERTAIN"",
-    ""matchedSpeakerId"": ""speaker_123"" | null,
-    ""confidence"": 0.85,
-    ""reasoning"": ""Voice pitch and linguistic style match Speaker 1"",
-    ""similarityScores"": [
-      {{""speakerId"": ""speaker_1"", ""score"": 0.85}},
-      {{""speakerId"": ""speaker_2"", ""score"": 0.23}}
-    ]
+    ""decision"": ""CONFIRMED_EXISTING"" | ""NEW_SPEAKER"" | ""UNCERTAIN"",
+    ""finalSpeakerId"": ""speaker_id"" or null,
+    ""confidence"": 0.95,
+    ""reasoning"": ""Scorecard showed 92% match for Speaker A, and context fits.""
   }},
-  
-  ""speakerProfile"": {{
-    ""suggestedName"": ""Professional Woman"" | null,
-    ""estimatedGender"": ""male/female/unknown"",
-    ""voiceCharacteristics"": ""high pitch, measured pace"",
-    ""communicationStyle"": ""formal/casual/technical"",
-    ""typicalPhrases"": [""phrase1"", ""phrase2""],
-    ""languageComplexity"": ""simple/sophisticated"",
-      ""turnContext"": ""Responding to [Name] or Initiating Topic""
-    }},
-    ""confidence"": 0.0
+
+  ""speakerProfileUpdate"": {{
+    ""speakerId"": ""speaker_id"",
+    ""suggestedName"": ""Extracted Name if introduced"",
+    ""estimatedGender"": ""Male"" | ""Female"" | ""Unknown"",
+    ""preferredLanguage"": ""Detected specific preference"",
+    ""newVocabulary"": [""unique"", ""words""],
+    ""tone"": ""formal"" | ""casual""
   }},
+
+  ""aiAssistance"": {{
+    ""triggerDetected"": true | false,
+    ""response"": ""Your helpful answer"",
+    ""responseTranslated"": ""Translated answer""
+  }},
+
   ""factExtraction"": {{
-    ""requiresFactExtraction"": false,
-    ""facts"": [],
-    ""confidence"": 0.0
+    ""requiresFactExtraction"": true | false,
+    ""facts"": [""Meeting at 5pm"", ""Budget approved""]
   }}
 }}
 ```
-
-**Analysis Guidelines:**
-
-**1. Transcription Improvement:**
-- Fix grammatical errors, incomplete words, and speech artifacts.
-- Maintain original meaning and speaker intent.
-
-**2. Speaker Fingerprinting (Master Observer Role):**
-- **Linguistic DNA**: Analyze the vocabulary and tone. Does this person sound like a leader, a technical expert, or a supportive listener?
-- **Relationship Detection**: Determine if the speaker is answering a question from the previous speaker or initiating a new topic.
-- **Identity Locking**: If the speaker refers to themselves or responds to a name (e.g., ""Thanks for that, Sarah""), use that to lock the identity.
-- **Language Consistency**: Note if the speaker keeps their unique ""style"" even when switching languages.
-
-**3. Intent & AI Assistant Trigger Detection:**
-- **AI_ASSISTANCE Intent**: Only when the speaker directly addresses the AI using trigger phrases:
-  - English: 'hey assistant', 'hey translator', 'ok translator', 'hello assistant', 'translator please'
-  - Spanish: 'hola asistente', 'traductor', 'asistente por favor', 'ayuda traductor'
-  - French: 'salut assistant', 'traducteur', 'assistant s''il vous plaît', 'aide traducteur'
-  - German: 'hallo assistent', 'übersetzer', 'assistent bitte', 'hilfe übersetzer'
-  - Arabic: 'مرحبا مساعد', 'مترجم', 'مساعد من فضلك', 'مساعدة مترجم'
-  - Chinese: '你好助手', '翻译员', '助手请', '帮助翻译'
-  - Hindi: 'नमस्ते सहायक', 'अनुवादक', 'सहायक कृपया', 'अनुवादक सहायता'
-  - Portuguese: 'olá assistente', 'tradutor', 'assistente por favor', 'ajuda tradutor'
-  - Italian: 'ciao assistente', 'traduttore', 'assistente per favore', 'aiuto traduttore'
-  - Russian: 'привет помощник', 'переводчик', 'помощник пожалуйста', 'помощь переводчик'
-  - And equivalent phrases in any other language
-- **SIMPLE_TRANSLATION Intent**: For all normal conversation between people (default behavior)
-- **Detection Logic**: Scan the transcription for AI trigger words/phrases in the detected language
-- **Context-Aware**: If triggered, provide helpful AI response based on the question and available session facts
-
-**Important Notes:**
-- Always return valid JSON - no extra text.
-- Set realistic confidence scores. Use null for unknown values.";
+";
     }
 
     private string BuildUserPrompt(EnhancedTranslationRequest request)
@@ -137,40 +119,93 @@ You must return a valid JSON object with this exact structure:
         var prompt = new StringBuilder();
         
         prompt.AppendLine($"### CURRENT UTTERANCE:");
-        prompt.AppendLine($"**Transcription:** {request.Text}");
-        prompt.AppendLine($"**Target Language:** {request.TargetLanguage}");
+        prompt.AppendLine($"**Transcription:** \"{request.Text}\"");
         prompt.AppendLine();
-        prompt.AppendLine($"**Language Routing Instructions:**");
-        prompt.AppendLine($"- Source Language: Use the detected audio language from transcription");
-        prompt.AppendLine($"- Target Language: Should be the opposite session language (if detected=primary then target=secondary, if detected=secondary then target=primary, if detected=neither then target=primary)");
-        prompt.AppendLine($"- Session has Primary Language and Secondary Language configured");
 
-        // Inject Session Context for Speaker Memory
+        // Extract session language configuration from context
+        string primaryLang = "en-US";
+        string secondaryLang = "es-ES";
+        string sessionId = request.SessionId ?? "unknown";
+        
         if (request.SessionContext != null)
         {
+            if (request.SessionContext.TryGetValue("primaryLanguage", out var primary))
+                primaryLang = primary?.ToString() ?? "en-US";
+            
+            if (request.SessionContext.TryGetValue("secondaryLanguage", out var secondary))
+                secondaryLang = secondary?.ToString() ?? "es-ES";
+                
+            if (request.SessionContext.TryGetValue("sessionId", out var sid))
+                sessionId = sid?.ToString() ?? "unknown";
+        }
+
+        prompt.AppendLine($"### DYNAMIC LANGUAGE ROUTING:");
+        prompt.AppendLine($"**Primary Language:** {primaryLang}");
+        prompt.AppendLine($"**Secondary Language:** {secondaryLang}");
+        prompt.AppendLine($"**Routing Rules:** Detected={primaryLang}→Target={secondaryLang}, Detected={secondaryLang}→Target={primaryLang}, Other→{primaryLang}");
+        prompt.AppendLine();
+
+        // 🚀 CLEAN: Add speaker context from speaker management service
+        if (sessionId != "unknown")
+        {
+            var speakerContext = _speakerService.BuildSpeakerPromptContext(sessionId);
+            prompt.AppendLine("### SPEAKER IDENTIFICATION CONTEXT:");
+            prompt.AppendLine(speakerContext);
             prompt.AppendLine();
-            prompt.AppendLine("### ROOM STATUS (Memory):");
-            
-            if (request.SessionContext.TryGetValue("speakers", out var speakers))
+        }
+
+        // Add acoustic signal if available
+        if (request.SessionContext != null)
+        {
+            // 🚀 NEW: Render the Acoustic Scorecard
+            if (request.SessionContext.TryGetValue("speakerScorecard", out var scorecardObj) 
+                && scorecardObj is List<SpeakerComparisonResult> scorecard && scorecard.Count > 0)
             {
-                prompt.AppendLine($"- Known Speakers in Room: {JsonSerializer.Serialize(speakers)}");
+                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD (Mathematical Evidence):");
+                foreach (var score in scorecard)
+                {
+                    prompt.AppendLine($"- **{score.DisplayName}** ({score.SpeakerId}): {score.CompositeScore:P0} Similarity (Pitch:{score.PitchSimilarity:P0}, Timbre:{score.TimbreSimilarity:P0})");
+                }
             }
-            
-            if (request.SessionContext.TryGetValue("lastSpeaker", out var lastSpeaker))
+            else
             {
-                prompt.AppendLine($"- Previous Speaker was: {lastSpeaker}");
+               prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD:");
+               prompt.AppendLine("No matches found (New acoustic profile).");
             }
 
-            if (request.SessionContext.TryGetValue("audioProvisionalId", out var provId))
+            // 🚀 CONTEXT: Last 5 turns for flow analysis
+            if (request.SessionContext.TryGetValue("recentHistory", out var historyObj) 
+                && historyObj is List<ConversationHistoryItem> history && history.Count > 0)
             {
-                prompt.AppendLine($"- Audio Engine provisional match: {provId}");
+                prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY (Last 5 Turns):");
+                foreach (var item in history)
+                {
+                    prompt.AppendLine($"- **{item.SpeakerName}** ({item.SpeakerId}): \"{item.Text}\"");
+                }
             }
+            else
+            {
+                prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY:");
+                prompt.AppendLine("No previous history available.");
+            }
+            prompt.AppendLine();
         }
         
-        prompt.AppendLine();
-        prompt.AppendLine("Analyze the utterance and provide the refined JSON response.");
+        prompt.AppendLine("### ANALYSIS INSTRUCTIONS:");
+        prompt.AppendLine("1. **Language Detection**: Identify source language and apply routing rules");
+        prompt.AppendLine("2. **Speaker Analysis**: Compare against known speakers above using voice + linguistic patterns");
+        prompt.AppendLine("3. **Decision**: Determine if CONFIRMED_EXISTING, NEW_SPEAKER, or UNCERTAIN");
+        prompt.AppendLine("4. **Translation**: Provide natural translation with proper target language");
+        prompt.AppendLine("5. **Output**: Return complete JSON response with all analysis");
         
         return prompt.ToString();
     }
 }
 
+
+public class ConversationHistoryItem
+{
+    public string SpeakerId { get; set; } = string.Empty;
+    public string SpeakerName { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
+}

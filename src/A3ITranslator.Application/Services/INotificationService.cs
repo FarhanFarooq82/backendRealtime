@@ -1,4 +1,4 @@
-using A3ITranslator.Application.DTOs.Speaker;
+using A3ITranslator.Application.Models.Speaker;
 
 namespace A3ITranslator.Application.Services;
 
@@ -15,5 +15,5 @@ public interface INotificationService
     // Audio-specific notifications
     Task NotifyAudioChunk(string connectionId, string base64Audio);
     Task NotifyTransactionComplete(string connectionId);
-    Task NotifySpeakerUpdate(string connectionId, SpeakerInfo speakerInfo);
+    Task NotifySpeakerUpdate(string connectionId, SpeakerProfile speakerInfo);
 }
