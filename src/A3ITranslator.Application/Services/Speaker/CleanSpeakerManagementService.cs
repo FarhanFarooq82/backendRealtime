@@ -1,18 +1,20 @@
 using A3ITranslator.Application.Models.Speaker;
 using A3ITranslator.Application.DTOs.Translation;
+using A3ITranslator.Application.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace A3ITranslator.Application.Services.Speaker;
 
 /// <summary>
-/// Unified Speaker Management Service - Manages the Master SpeakerProfile
+/// Modern Speaker Management Service - Single Source of Truth using Session Repository
 /// Implements Flow C by merging acoustic and linguistic signals.
+/// No backward compatibility - pure async modern implementation.
 /// </summary>
 public interface ISpeakerManagementService
 {
     Task<SpeakerOperationResult> ProcessSpeakerIdentificationAsync(string sessionId, SpeakerServicePayload payload);
-    List<SpeakerProfile> GetSessionSpeakers(string sessionId);
-    string BuildSpeakerPromptContext(string sessionId);
+    Task<List<SpeakerProfile>> GetSessionSpeakersAsync(string sessionId);
+    Task<string> BuildSpeakerPromptContextAsync(string sessionId);
     Task ClearSessionAsync(string sessionId);
 }
 
@@ -29,48 +31,82 @@ public class SpeakerOperationResult
 public class SpeakerManagementService : ISpeakerManagementService
 {
     private readonly ILogger<SpeakerManagementService> _logger;
-    private readonly Dictionary<string, List<SpeakerProfile>> _sessionSpeakers = new();
-    private readonly object _lock = new();
+    private readonly ISessionRepository _sessionRepository;
 
-    public SpeakerManagementService(ILogger<SpeakerManagementService> logger)
+    public SpeakerManagementService(
+        ILogger<SpeakerManagementService> logger,
+        ISessionRepository sessionRepository)
     {
         _logger = logger;
+        _sessionRepository = sessionRepository;
     }
 
     public async Task<SpeakerOperationResult> ProcessSpeakerIdentificationAsync(string sessionId, SpeakerServicePayload payload)
     {
-        await Task.CompletedTask;
         try
         {
-            lock (_lock)
+            var session = await _sessionRepository.GetByIdAsync(sessionId);
+            if (session == null)
             {
-                var speakers = GetSessionSpeakersInternal(sessionId);
-                var identification = payload.Identification;
-
-                return identification.Decision switch
-                {
-                    "CONFIRMED_EXISTING" => HandleExistingSpeaker(sessionId, speakers, payload),
-                    "NEW_SPEAKER" => HandleNewSpeaker(sessionId, speakers, payload),
-                    _ => HandleUncertainSpeaker(sessionId, speakers, payload)
+                _logger.LogWarning("⚠️ Session {SessionId} not found for speaker identification", sessionId);
+                return new SpeakerOperationResult 
+                { 
+                    Success = false, 
+                    ErrorMessage = "Session not found", 
+                    Action = "Failed" 
                 };
             }
+
+            var speakers = session.Speakers.ToList();
+            var identification = payload.Identification;
+
+            var result = identification.Decision switch
+            {
+                "CONFIRMED_EXISTING" => await HandleExistingSpeakerAsync(session, speakers, payload),
+                "NEW_SPEAKER" => await HandleNewSpeakerAsync(session, speakers, payload),
+                _ => await HandleUncertainSpeakerAsync(session, speakers, payload)
+            };
+
+            // Save session after any speaker changes
+            if (result.Success && (result.IsNewSpeaker || result.Action == "Updated"))
+            {
+                await _sessionRepository.SaveAsync(session);
+                _logger.LogInformation("💾 Session {SessionId} saved with speaker changes", sessionId);
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Failed to process speaker identification for session {SessionId}", sessionId);
-            return new SpeakerOperationResult { Success = false, ErrorMessage = ex.Message, Action = "Failed" };
+            return new SpeakerOperationResult 
+            { 
+                Success = false, 
+                ErrorMessage = ex.Message, 
+                Action = "Failed" 
+            };
         }
     }
 
-    public List<SpeakerProfile> GetSessionSpeakers(string sessionId)
+    public async Task<List<SpeakerProfile>> GetSessionSpeakersAsync(string sessionId)
     {
-        lock (_lock) { return GetSessionSpeakersInternal(sessionId); }
+        try
+        {
+            var session = await _sessionRepository.GetByIdAsync(sessionId);
+            return session?.Speakers.ToList() ?? new List<SpeakerProfile>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to get speakers for session {SessionId}", sessionId);
+            return new List<SpeakerProfile>();
+        }
     }
 
-    public string BuildSpeakerPromptContext(string sessionId)
+    public async Task<string> BuildSpeakerPromptContextAsync(string sessionId)
     {
-        var speakers = GetSessionSpeakers(sessionId);
-        if (!speakers.Any()) return "**No known speakers in this session yet.**";
+        var speakers = await GetSessionSpeakersAsync(sessionId);
+        if (!speakers.Any()) 
+            return "**No known speakers in this session yet.**";
 
         var context = new System.Text.StringBuilder();
         context.AppendLine("**Known Speakers in Session:**");
@@ -88,17 +124,29 @@ public class SpeakerManagementService : ISpeakerManagementService
 
     public async Task ClearSessionAsync(string sessionId)
     {
-        lock (_lock) { _sessionSpeakers.Remove(sessionId); }
-        await Task.CompletedTask;
+        try
+        {
+            var session = await _sessionRepository.GetByIdAsync(sessionId);
+            if (session != null)
+            {
+                // Clear speakers from session - the speakers list is private, so we'd need a method on the session
+                // For now, we'll just remove the session entirely which effectively clears all speakers
+                await _sessionRepository.RemoveByConnectionIdAsync(session.ConnectionId);
+                _logger.LogInformation("🧹 Session {SessionId} speakers cleared", sessionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to clear session {SessionId}", sessionId);
+        }
     }
 
-    private List<SpeakerProfile> GetSessionSpeakersInternal(string sessionId)
-    {
-        if (!_sessionSpeakers.ContainsKey(sessionId)) _sessionSpeakers[sessionId] = new List<SpeakerProfile>();
-        return _sessionSpeakers[sessionId];
-    }
+    // --- Private Speaker Handling Methods ---
 
-    private SpeakerOperationResult HandleExistingSpeaker(string sessionId, List<SpeakerProfile> speakers, SpeakerServicePayload payload)
+    private async Task<SpeakerOperationResult> HandleExistingSpeakerAsync(
+        Domain.Entities.ConversationSession session, 
+        List<SpeakerProfile> speakers, 
+        SpeakerServicePayload payload)
     {
         var speakerId = payload.Identification.FinalSpeakerId;
         var speaker = speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
@@ -107,12 +155,26 @@ public class SpeakerManagementService : ISpeakerManagementService
         {
             speaker.AddUtterance(payload.AudioLanguage, payload.TranscriptionConfidence);
             UpdateProfileFromPayload(speaker, payload);
-            return new SpeakerOperationResult { SpeakerId = speakerId!, Action = "Updated", Confidence = payload.Identification.Confidence };
+            
+            _logger.LogInformation("🔄 Updated existing speaker {SpeakerId} in session {SessionId}", 
+                speakerId, session.SessionId);
+            
+            return new SpeakerOperationResult 
+            { 
+                SpeakerId = speakerId!, 
+                Action = "Updated", 
+                Confidence = payload.Identification.Confidence 
+            };
         }
-        return HandleNewSpeaker(sessionId, speakers, payload);
+
+        // Speaker not found, treat as new
+        return await HandleNewSpeakerAsync(session, speakers, payload);
     }
 
-    private SpeakerOperationResult HandleNewSpeaker(string sessionId, List<SpeakerProfile> speakers, SpeakerServicePayload payload)
+    private Task<SpeakerOperationResult> HandleNewSpeakerAsync(
+        Domain.Entities.ConversationSession session,
+        List<SpeakerProfile> speakers, 
+        SpeakerServicePayload payload)
     {
         var newSpeakerId = payload.Identification.FinalSpeakerId ?? $"speaker_{speakers.Count + 1}";
         var speaker = new SpeakerProfile
@@ -124,8 +186,42 @@ public class SpeakerManagementService : ISpeakerManagementService
         speaker.AddUtterance(payload.AudioLanguage, payload.TranscriptionConfidence);
         UpdateProfileFromPayload(speaker, payload);
         
-        speakers.Add(speaker);
-        return new SpeakerOperationResult { SpeakerId = newSpeakerId, IsNewSpeaker = true, Action = "Created", Confidence = payload.Identification.Confidence };
+        // Add to session using domain method
+        session.AddSpeaker(speaker);
+        
+        _logger.LogInformation("✨ Created new speaker {SpeakerId} ({DisplayName}) in session {SessionId}", 
+            newSpeakerId, speaker.DisplayName, session.SessionId);
+        
+        return Task.FromResult(new SpeakerOperationResult 
+        { 
+            SpeakerId = newSpeakerId, 
+            IsNewSpeaker = true, 
+            Action = "Created", 
+            Confidence = payload.Identification.Confidence 
+        });
+    }
+
+    private Task<SpeakerOperationResult> HandleUncertainSpeakerAsync(
+        Domain.Entities.ConversationSession session,
+        List<SpeakerProfile> speakers, 
+        SpeakerServicePayload payload)
+    {
+        // If confidence is reasonable, treat as new speaker
+        if (payload.Identification.Confidence > 0.4f) 
+        {
+            return HandleNewSpeakerAsync(session, speakers, payload);
+        }
+        
+        _logger.LogWarning("❓ Skipped uncertain speaker identification in session {SessionId} (confidence: {Confidence})", 
+            session.SessionId, payload.Identification.Confidence);
+        
+        return Task.FromResult(new SpeakerOperationResult 
+        { 
+            Success = false, 
+            SpeakerId = "uncertain", 
+            Action = "Skipped",
+            Confidence = payload.Identification.Confidence
+        });
     }
 
     private void UpdateProfileFromPayload(SpeakerProfile speaker, SpeakerServicePayload payload)
@@ -152,11 +248,5 @@ public class SpeakerManagementService : ISpeakerManagementService
                  speaker.UpdateAcousticFeatures(payload.AudioFingerprint.AveragePitch, payload.AudioFingerprint.MfccVector);
              }
         }
-    }
-
-    private SpeakerOperationResult HandleUncertainSpeaker(string sessionId, List<SpeakerProfile> speakers, SpeakerServicePayload payload)
-    {
-        if (payload.Identification.Confidence > 0.4f) return HandleNewSpeaker(sessionId, speakers, payload);
-        return new SpeakerOperationResult { Success = false, SpeakerId = "uncertain", Action = "Skipped" };
     }
 }

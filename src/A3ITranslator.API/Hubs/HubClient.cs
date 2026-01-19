@@ -162,14 +162,10 @@ public class HubClient : Hub<IHubClient>, IDisposable
     {
         try
         {
+            // _logger.LogDebug("🎤 Received audio chunk: {Size} bytes", payload.AudioData?.Length ?? 0);
+
             if (_hubCancellationTokenSource.Token.IsCancellationRequested)
                 return;
-
-            if (string.IsNullOrEmpty(payload.AudioData))
-            {
-                await Clients.Caller.ReceiveError("Empty audio data");
-                return;
-            }
 
             byte[] audioBytes = Convert.FromBase64String(payload.AudioData);
             
@@ -188,6 +184,28 @@ public class HubClient : Hub<IHubClient>, IDisposable
         {
             _logger.LogError(ex, "❌ Audio processing error for {ConnectionId}", Context.ConnectionId);
             await Clients.Caller.ReceiveError("Audio processing failed");
+        }
+    }
+
+    /// <summary>
+    /// Signal utterance completion from frontend VAD
+    /// </summary>
+    public async Task CompleteUtterance()
+    {
+        try
+        {
+            _logger.LogDebug("🔇 Frontend VAD completion signal for {ConnectionId}", Context.ConnectionId);
+
+            if (_hubCancellationTokenSource.Token.IsCancellationRequested)
+                return;
+
+            // ✅ CLEAN ARCHITECTURE: Signal completion to orchestrator
+            await _conversationOrchestrator.CompleteUtteranceAsync(Context.ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Utterance completion error for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError("Utterance completion failed");
         }
     }
 }

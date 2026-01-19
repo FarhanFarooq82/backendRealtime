@@ -1,16 +1,9 @@
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Options; // ✅ Add this for IOptions
+using Microsoft.Extensions.Options;
 using A3ITranslator.API.Hubs;
 using A3ITranslator.API.Services;
 using A3ITranslator.Application.Services;
-using A3ITranslator.Application.Services.Speaker; // ✅ Add for clean speaker services
-using A3ITranslator.Application.Domain.Interfaces; // ✅ Add for ISessionRepository
-using A3ITranslator.Infrastructure.Persistence.Repositories; // ✅ Add for InMemorySessionRepository
-using A3ITranslator.Infrastructure.Services.Audio;
-using A3ITranslator.Infrastructure.Services;
-using A3ITranslator.Infrastructure.Services.Azure;
-using A3ITranslator.Infrastructure.Services.Translation; // 🆕 Add for translation services
-using A3ITranslator.Infrastructure.Configuration; // ✅ Add this for ServiceOptions
+using A3ITranslator.Infrastructure.Configuration;
 using A3ITranslator.Application;
 using A3ITranslator.Infrastructure;
 
@@ -28,7 +21,10 @@ builder.Services.Configure<ServiceOptions>(
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
-// Add API Controllers
+// ✅ API-Specific Services (Only what belongs in API layer)
+builder.Services.AddSingleton<IRealtimeNotificationService, SignalRNotificationService>();
+
+// Add API Controllers (keeping both LanguagesController and TranslationController)
 builder.Services.AddControllers();
 
 // Add API Explorer for development
@@ -45,36 +41,34 @@ builder.Services.AddSignalR(options =>
     options.HandshakeTimeout = TimeSpan.FromSeconds(30);
 });
 
-// 🔥 CRITICAL FIX: Register Domain Repository for Clean Architecture
-builder.Services.AddSingleton<ISessionRepository, InMemorySessionRepository>();
+// Configure Kestrel for both HTTP and HTTPS
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.ListenLocalhost(8000); // HTTP
+    serverOptions.ListenLocalhost(5001, listenOptions =>
+    {
+        listenOptions.UseHttps(); // HTTPS
+    });
+});
 
-// 🔥 CRITICAL FIX: STT services must be SINGLETONS to maintain chunk accumulation state
-// Scoped services get recreated for each request, losing accumulated audio buffers
-builder.Services.AddSingleton<GoogleStreamingSTTService>(); // ✅ SINGLETON: Maintains chunk state
-builder.Services.AddSingleton<AzureStreamingSTTService>();  // ✅ SINGLETON: Maintains chunk state
-builder.Services.AddSingleton<IStreamingSTTService, STTOrchestrator>(); // ✅ SINGLETON: Uses singleton services
-
-// 🎵 Audio Test Collector - DEBUG ONLY service for testing audio reception
-builder.Services.AddSingleton<AudioTestCollector>(); // ✅ SINGLETON: Accumulates audio chunks for testing
-
-// 🔧 Non-stateful services upgraded to Singleton for Orchestrator compatibility
-builder.Services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
-builder.Services.AddSingleton<IAudioFeatureExtractor, AudioFeatureExtractor>(); // ✅ SINGLETON: Feature extraction service
-builder.Services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
-builder.Services.AddSingleton<IRealtimeNotificationService, SignalRNotificationService>();
-builder.Services.AddSingleton<IGenAIService, AzureGenAIService>();
-builder.Services.AddSingleton<IStreamingTTSService, StreamingTTSService>();
-builder.Services.AddSingleton<IFactExtractionService, FactExtractionService>();
-
-// 🆕 Translation Services
-builder.Services.AddSingleton<ITranslationPromptService, TranslationPromptService>();
-builder.Services.AddSingleton<ITranslationOrchestrator, TranslationOrchestrator>();
-
-// ✅ Clean Services already registered in InfrastructureServiceRegistration
-builder.Services.AddSingleton<DataRouterService>();
-
-// TODO: Add these when they exist
-// builder.Services.AddScoped<IStreamingTranslationService, StreamingTranslationService>();
+// CORS for SignalR - Updated to include both ports
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("RealtimeOnly", policy =>
+    {
+        policy.WithOrigins(
+            "http://localhost:3000", 
+            "http://localhost:8000",  // Backend HTTP
+            "https://localhost:5001", // Backend HTTPS
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000",
+            "https://127.0.0.1:5001"
+        )
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials();
+    });
+});
 
 // Logging
 builder.Services.AddLogging(logging =>
@@ -84,20 +78,9 @@ builder.Services.AddLogging(logging =>
     logging.SetMinimumLevel(LogLevel.Information);
 });
 
-// CORS for SignalR
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("RealtimeOnly", policy =>
-    {
-        policy.WithOrigins("http://localhost:3000", "https://yourdomain.com", "http://127.0.0.1:3000")
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
-    });
-});
-
 var app = builder.Build();
 
+// Configure the HTTP request pipeline
 app.UseCors("RealtimeOnly");
 
 if (app.Environment.IsDevelopment())
@@ -105,10 +88,27 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-// Add API routing
+// ✅ Don't redirect HTTP to HTTPS - allow both
+// app.UseHttpsRedirection(); // Commented out to allow frontend flexibility
+
+app.UseAuthorization();
 app.MapControllers();
+
+// Map SignalR Hub - Match frontend expectation
 app.MapHub<HubClient>("/audio-hub");
 
+// Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "realtime-audio" }));
 
+// ✅ Application startup confirmation
+Console.WriteLine("🚀 A3I Realtime Translator API started successfully!");
+Console.WriteLine("📡 Available endpoints:");
+Console.WriteLine("   HTTP:  http://localhost:8000");
+Console.WriteLine("   HTTPS: https://localhost:5001");
+Console.WriteLine("🌐 SignalR Hub available at: /audio-hub");
+Console.WriteLine("📡 Languages API available at: /api/Languages");
+Console.WriteLine("🔤 Translation API available at: /api/translate-text");
+Console.WriteLine("💓 Health check available at: /health");
+
+// ✅ CRITICAL: Keep the application running
 app.Run();

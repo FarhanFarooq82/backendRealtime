@@ -78,7 +78,7 @@ public class StreamingTranslationOrchestrator : IStreamingTranslationOrchestrato
             };
 
             // Build comprehensive prompts
-            var (systemPrompt, userPrompt) = _promptService.BuildTranslationPrompts(request);
+            var (systemPrompt, userPrompt) = await _promptService.BuildTranslationPromptsAsync(request);
 
             // Start streaming GenAI call
             var streamingTask = ProcessGenAIStreamAsync(

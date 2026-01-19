@@ -107,6 +107,13 @@ public interface IConversationOrchestrator
     Task ProcessAudioChunkAsync(string connectionId, byte[] audioChunk);
 
     /// <summary>
+    /// Signal utterance completion from frontend VAD
+    /// Triggers processing of the accumulated utterance through GenAI and TTS
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    Task CompleteUtteranceAsync(string connectionId);
+
+    /// <summary>
     /// Initialize connection pipeline with language candidates
     /// Prepares STT, Speaker, and VAD processing for incoming audio
     /// </summary>

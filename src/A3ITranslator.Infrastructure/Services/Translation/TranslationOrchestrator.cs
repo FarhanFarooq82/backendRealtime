@@ -35,7 +35,7 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             _logger.LogInformation("Starting translation processing for: {Text}", request.Text);
 
             // Build comprehensive prompts using the prompt service
-            var (systemPrompt, userPrompt) = _promptService.BuildTranslationPrompts(request);
+            var (systemPrompt, userPrompt) = await _promptService.BuildTranslationPromptsAsync(request);
 
             _logger.LogDebug("Generated prompts - System: {SystemLength} chars, User: {UserLength} chars",
                 systemPrompt.Length, userPrompt.Length);
@@ -84,7 +84,7 @@ public class TranslationOrchestrator : ITranslationOrchestrator
 
             // Build comprehensive prompts using the prompt service
             Console.WriteLine($"TIMESTAMP_TRANSLATION_PROMPT_BUILD_START: {DateTime.UtcNow:HH:mm:ss.fff} - Building translation prompts");
-            var (systemPrompt, userPrompt) = _promptService.BuildTranslationPrompts(request);
+            var (systemPrompt, userPrompt) = await _promptService.BuildTranslationPromptsAsync(request);
             Console.WriteLine($"TIMESTAMP_TRANSLATION_PROMPT_BUILD_END: {DateTime.UtcNow:HH:mm:ss.fff} - Prompts built: System {systemPrompt.Length} chars, User {userPrompt.Length} chars");
 
             _logger.LogDebug("Generated prompts - System: {SystemLength} chars, User: {UserLength} chars",

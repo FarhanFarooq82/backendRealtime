@@ -23,10 +23,10 @@ public class TranslationPromptService : ITranslationPromptService
         _speakerService = speakerService;
     }
 
-    public (string systemPrompt, string userPrompt) BuildTranslationPrompts(EnhancedTranslationRequest request)
+    public async Task<(string systemPrompt, string userPrompt)> BuildTranslationPromptsAsync(EnhancedTranslationRequest request)
     {
         var systemPrompt = BuildSystemPrompt(request.SourceLanguage, request.TargetLanguage);
-        var userPrompt = BuildUserPrompt(request);
+        var userPrompt = await BuildUserPromptAsync(request);
         
         _logger.LogDebug("Built translation prompts for {SourceLang} -> {TargetLang}",
             request.SourceLanguage, request.TargetLanguage);
@@ -67,20 +67,23 @@ You will receive a user message containing:
 3. 🧠 **INTENT & AI ASSISTANCE**:
    - **Intent**: 'SIMPLE_TRANSLATION' (Default) vs 'AI_ASSISTANCE' (User asks YOU for help).
    - **Trigger**: Only specific calls like ""Assistant, what did he say?"" or ""Translator, clarify that.""
-   - **Action**: If triggered, provide a concise, helpful response in `aiAssistance`.
+   - **Action**: If triggered, provide a concise, helpful response in `aiAssistance` in the audio language and translated response in the target language.
 
 4. 📝 **FACT EXTRACTION**:
-   - Extract strictly factual data: Dates, Deadlines, Names, Key Decisions.
-   - Ignore small talk.
+   - **Goal**: Extract only NEW, unique facts to avoid duplication.
+   - **Context Awareness**: Review existing facts from previous conversation.
+   - **Extract**: Dates, Deadlines, Names, Key Decisions, Important Details.
+   - **Ignore**: Small talk, repeated information, previously mentioned facts.
+   - **Rule**: Only add facts that are genuinely new or significantly different from existing ones.
 
 **STRICT JSON OUTPUT FORMAT**:
 ```json
 {{
-  ""improvedTranscription"": ""Cleaned text (no stutter)"",
+  ""improvedTranscription"": ""Cleaned text (no stutter) in native script, as transcription could be romanized"",
   ""translation"": ""Target language translation"",
   ""intent"": ""SIMPLE_TRANSLATION"" | ""AI_ASSISTANCE"",
   ""translationLanguage"": ""Target BCP-47"",
-  ""audioLanguage"": ""Detected Source BCP-47"",
+  ""audioLanguage"": ""Detected Source BCP-47, the transcript could be in roman transcript as well, see possibilities form routing rules"",
   ""confidence"": 0.98,
   
   ""speakerIdentification"": {{
@@ -101,8 +104,9 @@ You will receive a user message containing:
 
   ""aiAssistance"": {{
     ""triggerDetected"": true | false,
-    ""response"": ""Your helpful answer"",
-    ""responseTranslated"": ""Translated answer""
+    ""response"": ""Your helpful answer, it may be from facts, previous turns, context, model (generic), specific internet lookup for realtime info"",
+    ""responseTranslated"": ""Translated answer"",
+    ""confidence"": 0.98
   }},
 
   ""factExtraction"": {{
@@ -114,7 +118,7 @@ You will receive a user message containing:
 ";
     }
 
-    private string BuildUserPrompt(EnhancedTranslationRequest request)
+    private async Task<string> BuildUserPromptAsync(EnhancedTranslationRequest request)
     {
         var prompt = new StringBuilder();
         
@@ -122,33 +126,12 @@ You will receive a user message containing:
         prompt.AppendLine($"**Transcription:** \"{request.Text}\"");
         prompt.AppendLine();
 
-        // Extract session language configuration from context
-        string primaryLang = "en-US";
-        string secondaryLang = "es-ES";
         string sessionId = request.SessionId ?? "unknown";
-        
-        if (request.SessionContext != null)
-        {
-            if (request.SessionContext.TryGetValue("primaryLanguage", out var primary))
-                primaryLang = primary?.ToString() ?? "en-US";
-            
-            if (request.SessionContext.TryGetValue("secondaryLanguage", out var secondary))
-                secondaryLang = secondary?.ToString() ?? "es-ES";
-                
-            if (request.SessionContext.TryGetValue("sessionId", out var sid))
-                sessionId = sid?.ToString() ?? "unknown";
-        }
-
-        prompt.AppendLine($"### DYNAMIC LANGUAGE ROUTING:");
-        prompt.AppendLine($"**Primary Language:** {primaryLang}");
-        prompt.AppendLine($"**Secondary Language:** {secondaryLang}");
-        prompt.AppendLine($"**Routing Rules:** Detected={primaryLang}→Target={secondaryLang}, Detected={secondaryLang}→Target={primaryLang}, Other→{primaryLang}");
-        prompt.AppendLine();
 
         // 🚀 CLEAN: Add speaker context from speaker management service
         if (sessionId != "unknown")
         {
-            var speakerContext = _speakerService.BuildSpeakerPromptContext(sessionId);
+            var speakerContext = await _speakerService.BuildSpeakerPromptContextAsync(sessionId);
             prompt.AppendLine("### SPEAKER IDENTIFICATION CONTEXT:");
             prompt.AppendLine(speakerContext);
             prompt.AppendLine();
@@ -188,6 +171,23 @@ You will receive a user message containing:
                 prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY:");
                 prompt.AppendLine("No previous history available.");
             }
+
+            // 🚀 NEW: Existing facts to prevent duplication
+            if (request.SessionContext.TryGetValue("existingFacts", out var factsObj) 
+                && factsObj is List<string> existingFacts && existingFacts.Count > 0)
+            {
+                prompt.AppendLine("### 📋 EXISTING SESSION FACTS (Do NOT duplicate these):");
+                foreach (var fact in existingFacts)
+                {
+                    prompt.AppendLine($"- {fact}");
+                }
+                prompt.AppendLine("**Important**: Only extract NEW facts that are not already listed above.");
+            }
+            else
+            {
+                prompt.AppendLine("### 📋 EXISTING SESSION FACTS:");
+                prompt.AppendLine("No facts extracted yet in this session.");
+            }
             prompt.AppendLine();
         }
         
@@ -196,7 +196,8 @@ You will receive a user message containing:
         prompt.AppendLine("2. **Speaker Analysis**: Compare against known speakers above using voice + linguistic patterns");
         prompt.AppendLine("3. **Decision**: Determine if CONFIRMED_EXISTING, NEW_SPEAKER, or UNCERTAIN");
         prompt.AppendLine("4. **Translation**: Provide natural translation with proper target language");
-        prompt.AppendLine("5. **Output**: Return complete JSON response with all analysis");
+        prompt.AppendLine("5. **Fact Extraction**: Extract only NEW facts not already in 'EXISTING SESSION FACTS'");
+        prompt.AppendLine("6. **Output**: Return complete JSON response with all analysis");
         
         return prompt.ToString();
     }

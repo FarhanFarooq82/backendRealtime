@@ -6,6 +6,8 @@ using Google.Cloud.Speech.V2;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Google.Protobuf;
+using Grpc.Core; // ✅ Fix RpcException
+using System.Runtime.CompilerServices;
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
 
@@ -157,7 +159,7 @@ public class GoogleStreamingSTTService : IStreamingSTTService
         {"cy-GB", "Welsh (United Kingdom)"}
     };
 
-public GoogleStreamingSTTService(
+    public GoogleStreamingSTTService(
         ILogger<GoogleStreamingSTTService> logger,
         IOptions<ServiceOptions> serviceOptions)
     {
@@ -300,40 +302,50 @@ public GoogleStreamingSTTService(
         };
     }
 
-    public async IAsyncEnumerable<TranscriptionResult>  ProcessAutoLanguageDetectionAsync(
+    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
         ChannelReader<byte[]> audioStream,
         string[] candidateLanguages,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        Console.WriteLine($"TIMESTAMP_STT_METHOD_START: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessAutoLanguageDetectionAsync started");
+        
         if (_speechClient == null)
         {
             _logger.LogError("SpeechClient is null.");
             yield break;
         }
 
-        await foreach (var result in ProcessGoogleAutoDetectionAsync(audioStream, candidateLanguages, cancellationToken))
-        {
-           yield return result;
-        }
-    }
-
-    private async IAsyncEnumerable<TranscriptionResult> ProcessGoogleAutoDetectionAsync(
-        ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
         var projectId = GetProjectId().Trim();
-        var location = (!string.IsNullOrEmpty(_googleOptions.Location) ? _googleOptions.Location : "europe-west4").Trim();
+        var location = (!string.IsNullOrEmpty(_googleOptions.Location) ? _googleOptions.Location : "eu").Trim();
         
-        // IMPORTANT: Use a created recognizer ID for regional stability
         var recognizerId = (!string.IsNullOrEmpty(_googleOptions.RecognizerId) ? _googleOptions.RecognizerId : "my-realtime-recognizer").Trim();
         string recognizerPath = $"projects/{projectId}/locations/{location}/recognizers/{recognizerId}";
 
+        Console.WriteLine($"TIMESTAMP_STT_BEFORE_STREAM_ATTEMPT: {DateTime.UtcNow:HH:mm:ss.fff} - About to call ProcessGoogleStreamAttemptAsync");
+        
+        // 🔄 SIMPLE KEEP-ALIVE STRATEGY - Stream until utterance completion
+        await foreach (var result in ProcessGoogleStreamAttemptAsync(audioStream, candidateLanguages, projectId, location, recognizerPath, cancellationToken))
+        {
+            Console.WriteLine($"TIMESTAMP_STT_RESULT_YIELDED: {DateTime.UtcNow:HH:mm:ss.fff} - STT result yielded: '{result.Text}' IsFinal: {result.IsFinal}");
+            yield return result;
+        }
+        
+        Console.WriteLine($"TIMESTAMP_STT_METHOD_END: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessAutoLanguageDetectionAsync completed");
+    }
+
+    private async IAsyncEnumerable<TranscriptionResult> ProcessGoogleStreamAttemptAsync(
+        ChannelReader<byte[]> audioStream,
+        string[] candidateLanguages,
+        string projectId,
+        string location,
+        string recognizerPath,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        Console.WriteLine($"TIMESTAMP_STT_STREAM_ATTEMPT_START: {DateTime.UtcNow:HH:mm:ss.fff} - ProcessGoogleStreamAttemptAsync started");
+        
         var config = new RecognitionConfig
         {
-            // 🌍 ENABLE TRUE AUTO-DETECTION: Add all candidate languages
-            LanguageCodes = { candidateLanguages.FirstOrDefault() }, // Multiple languages for auto-detection
-
+            LanguageCodes = { new[] { "en-US" } },
             ExplicitDecodingConfig = new ExplicitDecodingConfig
             {
                 Encoding = ExplicitDecodingConfig.Types.AudioEncoding.WebmOpus,
@@ -344,7 +356,9 @@ public GoogleStreamingSTTService(
 
         var streamingCall = _speechClient!.StreamingRecognize();
 
-        // HANDSHAKE: Send the initial config
+        Console.WriteLine($"TIMESTAMP_STT_STREAM_CREATED: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT streaming call created");
+
+        // HANDSHAKE
         await streamingCall.WriteAsync(new StreamingRecognizeRequest
         {
             Recognizer = recognizerPath,
@@ -353,37 +367,72 @@ public GoogleStreamingSTTService(
                 Config = config,
                 StreamingFeatures = new StreamingRecognitionFeatures
                 {
-                    InterimResults = true, // KEY FOR LOW LATENCY
+                    InterimResults = true,
                     EnableVoiceActivityEvents = true 
                 }
             }
         });
 
-        // Start reading responses in parallel to sending audio
-        var responseEnumerator = streamingCall.GetResponseStream().WithCancellation(cancellationToken);
+        Console.WriteLine($"TIMESTAMP_STT_HANDSHAKE_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT handshake completed");
+        _logger.LogInformation("🎤 Google STT Stream Started (Region: {Region}) - Keep-alive until utterance completion", location);
 
+        // 🔄 AUDIO PUSHER TASK - Keeps stream alive by sending audio chunks
         var audioPushTask = Task.Run(async () =>
         {
             try
             {
+                Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_START: {DateTime.UtcNow:HH:mm:ss.fff} - Audio push task started");
+                bool firstChunk = true;
+                
                 await foreach (var chunk in audioStream.ReadAllAsync(cancellationToken))
                 {
-                    await streamingCall.WriteAsync(new StreamingRecognizeRequest
+                    if (firstChunk)
                     {
-                        Audio = ByteString.CopyFrom(chunk)
-                    });
+                        Console.WriteLine($"TIMESTAMP_STT_FIRST_CHUNK: {DateTime.UtcNow:HH:mm:ss.fff} - First audio chunk received, size: {chunk.Length}");
+                        firstChunk = false;
+                    }
+                    
+                    if (chunk.Length > 0) // Only send non-empty audio chunks
+                    {
+                        await streamingCall.WriteAsync(new StreamingRecognizeRequest { Audio = ByteString.CopyFrom(chunk) });
+                    }
+                }
+                
+                // ⚡ IMMEDIATE STREAM COMPLETION: Close Google STT stream as soon as audio ends
+                Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_END: {DateTime.UtcNow:HH:mm:ss.fff} - Audio stream ended - immediately completing Google STT stream");
+                await streamingCall.WriteCompleteAsync();
+                Console.WriteLine($"TIMESTAMP_STT_STREAM_COMPLETED: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT stream completed successfully");
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_CANCELLED: {DateTime.UtcNow:HH:mm:ss.fff} - Audio stream cancelled - completing Google STT stream");
+                // ⚡ GRACEFUL CANCELLATION: Still close stream properly to avoid timeout
+                try 
+                { 
+                    await streamingCall.WriteCompleteAsync(); 
+                    Console.WriteLine($"TIMESTAMP_STT_STREAM_CLOSED_ON_CANCEL: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT stream closed gracefully on cancellation");
+                } 
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"TIMESTAMP_STT_STREAM_CLOSE_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - Error closing stream: {ex.Message}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Error while sending audio chunks to Google STT.");
+                Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - Audio push error: {ex.Message}");
+                _logger.LogWarning(ex, "⚠️ Audio push error - Google STT stream will naturally close");
+                // Still try to close stream
+                try { await streamingCall.WriteCompleteAsync(); } catch { }
             }
             finally
             {
-                await streamingCall.WriteCompleteAsync();
+                Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_CLEANUP: {DateTime.UtcNow:HH:mm:ss.fff} - Audio push task cleanup completed");
             }
-        });
+        }, cancellationToken);
 
+        // 📤 RESPONSE YIELDING - Stream stays alive until cancellation or completion
+        var responseEnumerator = streamingCall.GetResponseStream().WithCancellation(cancellationToken);
+        
         await foreach (var response in responseEnumerator)
         {
             if (response.Results?.Count > 0)
@@ -392,31 +441,35 @@ public GoogleStreamingSTTService(
                 {
                     if (result.Alternatives?.Count > 0)
                     {
-                        var alternative = result.Alternatives[0];
+                        var alt = result.Alternatives[0];
+                        var speakerLabel = alt.Words.FirstOrDefault()?.SpeakerLabel ?? "0";
                         
-                        // Extract Speaker Tag from Diarization (if available)
-                        var speakerLabel = alternative.Words.FirstOrDefault()?.SpeakerLabel ?? "0";
-                        if (speakerLabel != "0" && !string.IsNullOrEmpty(speakerLabel))
-                        {
-                            _logger.LogDebug("🗣️ Speaker {SpeakerLabel} detected in: '{Text}'", speakerLabel, alternative.Transcript);
-                        }
-                        
-                        // The first few results will have IsFinal = false. 
-                        // These are your low-latency 'interim' transcripts.
                         yield return new TranscriptionResult
                         {
-                            Text = alternative.Transcript,
+                            Text = alt.Transcript,
                             IsFinal = result.IsFinal,
-                            Confidence = alternative.Confidence,
+                            Confidence = alt.Confidence,
                             Language = MapFromGoogleResponseLanguage(result.LanguageCode)
                         };
                     }
                 }
             }
         }
-
-        // Wait for audio task to complete
-        await audioPushTask;
+        
+        Console.WriteLine($"TIMESTAMP_STT_RESPONSE_STREAM_ENDED: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT response stream ended");
+        _logger.LogInformation("✅ Google STT stream completed (utterance finished)");
+        
+        // Ensure audio push task completes
+        try
+        {
+            await audioPushTask;
+            Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_AWAITED: {DateTime.UtcNow:HH:mm:ss.fff} - Audio push task completed");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"TIMESTAMP_STT_AUDIO_PUSH_AWAIT_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - Error waiting for audio push: {ex.Message}");
+            _logger.LogWarning(ex, "⚠️ Error waiting for audio push task completion");
+        }
     }
 
     private string GetProjectId()

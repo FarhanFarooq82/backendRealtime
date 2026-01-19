@@ -4,75 +4,60 @@ using A3ITranslator.Application.Models.Speaker;
 namespace A3ITranslator.Application.Models.Conversation;
 
 /// <summary>
-/// Enhanced utterance with language resolution and speaker context
+/// Modern frontend VAD-driven utterance collector.
+/// Collects transcription results until frontend signals completion.
+/// Follows SOLID principles and clean architecture patterns.
 /// </summary>
-public class UtteranceWithContext
+public class UtteranceCollector
 {
-    public string Text { get; set; } = string.Empty;
-    public string SourceLanguage { get; set; } = string.Empty;
-    public string TargetLanguage { get; set; } = string.Empty;
-    public string DominantLanguage { get; set; } = string.Empty;
-    public float TranscriptionConfidence { get; set; } = 0f;
-    public string? ProvisionalSpeakerId { get; set; }
-    public float SpeakerConfidence { get; set; } = 0f;
-    public List<TranscriptionResult> DetectionResults { get; set; } = new();
-    public AudioFingerprint? AudioFingerprint { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-}
-
-/// <summary>
-/// Multi-language speaker-aware utterance collector with VAD support
-/// Extends the existing pattern with speaker context and language resolution
-/// </summary>
-public class MultiLanguageSpeakerAwareUtteranceCollector
-{
-    // ✅ Existing VAD logic
+    // Core collection state
     private readonly List<string> _finalUtterances = new();
-    private DateTime _lastResultTime = DateTime.UtcNow;
-    private readonly TimeSpan _vadTimeout = TimeSpan.FromMilliseconds(1500);
-    private string _currentInterimText = string.Empty;
-    
-    // ✨ NEW: Enhanced speaker and language tracking
-    private readonly Dictionary<string, int> _languageVotes = new();
     private readonly List<TranscriptionResult> _allResults = new();
+    private readonly Dictionary<string, int> _languageVotes = new();
     private readonly List<float> _confidenceScores = new();
-    private AudioFingerprint? _accumulatedAudioFingerprint;
+    
+    // Current processing state
+    private string _currentInterimText = string.Empty;
+    private bool _isCompleted = false;
+    
+    // Speaker context
     private string? _provisionalSpeakerId;
     private float _speakerMatchConfidence = 0f;
+    private AudioFingerprint? _accumulatedAudioFingerprint;
 
     /// <summary>
-    /// Add transcription result with enhanced tracking
+    /// Add transcription result from STT service
     /// </summary>
-    public void AddResult(TranscriptionResult result)
+    public void AddTranscriptionResult(TranscriptionResult result)
     {
-        _lastResultTime = DateTime.UtcNow;
+        if (_isCompleted)
+            return; // Ignore results after completion
+
         _allResults.Add(result);
         _confidenceScores.Add((float)result.Confidence);
 
-        // FILTERABLE: STT result received
-        Console.WriteLine($"TIMESTAMP_ADD_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Text: '{result.Text}' - IsFinal: {result.IsFinal} - Language: {result.Language}");
-
         if (result.IsFinal)
         {
-            // FILTERABLE: Final result processed
-            Console.WriteLine($"TIMESTAMP_FINAL_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Final text: '{result.Text}' - Language: {result.Language}");
-            
-            // ✅ Existing: Add final utterance
-            if (!string.IsNullOrWhiteSpace(result.Text))
-            {
-                _finalUtterances.Add(result.Text.Trim());
-            }
-            
-            // ✨ NEW: Track language votes for dominance calculation
-            _languageVotes[result.Language] = 
-                _languageVotes.GetValueOrDefault(result.Language, 0) + 1;
-                
-            _currentInterimText = string.Empty;
+            ProcessFinalResult(result);
         }
         else
         {
-            // ✅ Existing: Update interim text
-            _currentInterimText = result.Text;
+            UpdateInterimResult(result);
+        }
+    }
+
+    /// <summary>
+    /// Signal utterance completion from frontend VAD
+    /// </summary>
+    public void CompleteUtterance()
+    {
+        _isCompleted = true;
+        
+        // Add any pending interim text as final
+        if (!string.IsNullOrWhiteSpace(_currentInterimText))
+        {
+            _finalUtterances.Add(_currentInterimText.Trim());
+            _currentInterimText = string.Empty;
         }
     }
 
@@ -87,12 +72,15 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
     }
 
     /// <summary>
-    /// Get utterance with resolved languages and speaker context
+    /// Get complete utterance with resolved languages and speaker context
     /// </summary>
-    public UtteranceWithContext GetUtteranceWithResolvedLanguages(
+    public UtteranceWithContext GetCompleteUtterance(
         string[] candidateLanguages, 
         string sessionPrimaryLanguage)
     {
+        if (!_isCompleted || !_finalUtterances.Any())
+            throw new InvalidOperationException("Utterance not completed or no content available");
+
         var dominantLanguage = ResolveDominantLanguage();
         var (sourceLanguage, targetLanguage) = ResolveSourceTargetLanguages(
             dominantLanguage, candidateLanguages, sessionPrimaryLanguage);
@@ -114,6 +102,93 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
     }
 
     /// <summary>
+    /// Get accumulated text (for compatibility with existing code)
+    /// </summary>
+    public string GetAccumulatedText()
+    {
+        return string.Join(" ", _finalUtterances).Trim();
+    }
+
+    /// <summary>
+    /// Get current display text for real-time UI updates
+    /// </summary>
+    public string GetCurrentDisplayText()
+    {
+        var accumulated = GetAccumulatedText();
+        if (!string.IsNullOrWhiteSpace(_currentInterimText))
+        {
+            return string.IsNullOrWhiteSpace(accumulated) 
+                ? _currentInterimText 
+                : $"{accumulated} {_currentInterimText}";
+        }
+        return accumulated;
+    }
+
+    /// <summary>
+    /// Check if utterance is completed
+    /// </summary>
+    public bool IsCompleted => _isCompleted;
+
+    /// <summary>
+    /// Check if has accumulated text
+    /// </summary>
+    public bool HasAccumulatedText => _finalUtterances.Any();
+
+    /// <summary>
+    /// Get utterance count
+    /// </summary>
+    public int UtteranceCount => _finalUtterances.Count;
+
+    /// <summary>
+    /// Reset collector for new utterance
+    /// </summary>
+    public void Reset()
+    {
+        _finalUtterances.Clear();
+        _currentInterimText = string.Empty;
+        _languageVotes.Clear();
+        _allResults.Clear();
+        _confidenceScores.Clear();
+        _provisionalSpeakerId = null;
+        _speakerMatchConfidence = 0f;
+        _accumulatedAudioFingerprint = null;
+        _isCompleted = false;
+    }
+
+    // --- Private Methods ---
+
+    /// <summary>
+    /// Process final transcription result
+    /// </summary>
+    private void ProcessFinalResult(TranscriptionResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.Text))
+        {
+            _finalUtterances.Add(result.Text.Trim());
+            TrackLanguageVote(result.Language);
+        }
+        _currentInterimText = string.Empty;
+    }
+
+    /// <summary>
+    /// Update interim text for real-time display
+    /// </summary>
+    private void UpdateInterimResult(TranscriptionResult result)
+    {
+        _currentInterimText = result.Text ?? string.Empty;
+        TrackLanguageVote(result.Language);
+    }
+
+    /// <summary>
+    /// Track language votes for dominant language resolution
+    /// </summary>
+    private void TrackLanguageVote(string language)
+    {
+        if (string.IsNullOrWhiteSpace(language)) return;
+        _languageVotes[language] = _languageVotes.GetValueOrDefault(language, 0) + 1;
+    }
+
+    /// <summary>
     /// Resolve the dominant language based on voting
     /// </summary>
     private string ResolveDominantLanguage()
@@ -129,7 +204,6 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
 
     /// <summary>
     /// Resolve source and target languages based on dominant language and candidates
-    /// Implements the mapping rules from our architecture discussion
     /// </summary>
     private (string sourceLanguage, string targetLanguage) ResolveSourceTargetLanguages(
         string dominantLanguage, 
@@ -169,42 +243,5 @@ public class MultiLanguageSpeakerAwareUtteranceCollector
     {
         if (_confidenceScores.Count == 0) return 0f;
         return _confidenceScores.Average();
-    }
-
-    // ✅ Existing methods maintained
-    public string GetAccumulatedText()
-    {
-        return string.Join(" ", _finalUtterances).Trim();
-    }
-
-    public string GetCurrentDisplayText()
-    {
-        var accumulated = GetAccumulatedText();
-        if (!string.IsNullOrWhiteSpace(_currentInterimText))
-        {
-            return string.IsNullOrWhiteSpace(accumulated) 
-                ? _currentInterimText 
-                : $"{accumulated} {_currentInterimText}";
-        }
-        return accumulated;
-    }
-
-    public bool HasTimedOut() => DateTime.UtcNow - _lastResultTime >= _vadTimeout;
-
-    public bool HasAccumulatedText => _finalUtterances.Any();
-
-    public int UtteranceCount => _finalUtterances.Count;
-
-    public void Reset()
-    {
-        _finalUtterances.Clear();
-        _currentInterimText = string.Empty;
-        _languageVotes.Clear();
-        _allResults.Clear();
-        _confidenceScores.Clear();
-        _lastResultTime = DateTime.UtcNow;
-        _provisionalSpeakerId = null;
-        _speakerMatchConfidence = 0f;
-        _accumulatedAudioFingerprint = null;
     }
 }
