@@ -302,12 +302,15 @@ public class GoogleStreamingSTTService : IStreamingSTTService
         };
     }
 
-    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+    /// <summary>
+    /// Process audio stream with the specified language for transcription
+    /// </summary>
+    public async IAsyncEnumerable<TranscriptionResult> ProcessStreamAsync(
         ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
+        string language,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        Console.WriteLine($"TIMESTAMP_STT_METHOD_START: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessAutoLanguageDetectionAsync started");
+        Console.WriteLine($"TIMESTAMP_STT_METHOD_START: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessStreamAsync started for language: {language}");
         
         if (_speechClient == null)
         {
@@ -317,35 +320,34 @@ public class GoogleStreamingSTTService : IStreamingSTTService
 
         var projectId = GetProjectId().Trim();
         var location = (!string.IsNullOrEmpty(_googleOptions.Location) ? _googleOptions.Location : "eu").Trim();
-        
         var recognizerId = (!string.IsNullOrEmpty(_googleOptions.RecognizerId) ? _googleOptions.RecognizerId : "my-realtime-recognizer").Trim();
         string recognizerPath = $"projects/{projectId}/locations/{location}/recognizers/{recognizerId}";
 
-        Console.WriteLine($"TIMESTAMP_STT_BEFORE_STREAM_ATTEMPT: {DateTime.UtcNow:HH:mm:ss.fff} - About to call ProcessGoogleStreamAttemptAsync");
+        Console.WriteLine($"TIMESTAMP_STT_BEFORE_STREAM_ATTEMPT: {DateTime.UtcNow:HH:mm:ss.fff} - About to call ProcessGoogleStreamAttemptAsync for language: {language}");
         
-        // 🔄 SIMPLE KEEP-ALIVE STRATEGY - Stream until utterance completion
-        await foreach (var result in ProcessGoogleStreamAttemptAsync(audioStream, candidateLanguages, projectId, location, recognizerPath, cancellationToken))
+        await foreach (var result in ProcessGoogleStreamAttemptAsync(audioStream, language, projectId, location, recognizerPath, cancellationToken))
         {
             Console.WriteLine($"TIMESTAMP_STT_RESULT_YIELDED: {DateTime.UtcNow:HH:mm:ss.fff} - STT result yielded: '{result.Text}' IsFinal: {result.IsFinal}");
             yield return result;
         }
         
-        Console.WriteLine($"TIMESTAMP_STT_METHOD_END: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessAutoLanguageDetectionAsync completed");
+        Console.WriteLine($"TIMESTAMP_STT_METHOD_END: {DateTime.UtcNow:HH:mm:ss.fff} - Google STT ProcessStreamAsync completed for language: {language}");
     }
 
     private async IAsyncEnumerable<TranscriptionResult> ProcessGoogleStreamAttemptAsync(
         ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
+        string language,
         string projectId,
         string location,
         string recognizerPath,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        Console.WriteLine($"TIMESTAMP_STT_STREAM_ATTEMPT_START: {DateTime.UtcNow:HH:mm:ss.fff} - ProcessGoogleStreamAttemptAsync started");
+        Console.WriteLine($"TIMESTAMP_STT_STREAM_ATTEMPT_START: {DateTime.UtcNow:HH:mm:ss.fff} - ProcessGoogleStreamAttemptAsync started for language: {language}");
         
+        var mappedLanguage = MapToGoogleLanguageCode(language);
         var config = new RecognitionConfig
         {
-            LanguageCodes = { new[] { "en-US" } },
+            LanguageCodes = { mappedLanguage },
             ExplicitDecodingConfig = new ExplicitDecodingConfig
             {
                 Encoding = ExplicitDecodingConfig.Types.AudioEncoding.WebmOpus,

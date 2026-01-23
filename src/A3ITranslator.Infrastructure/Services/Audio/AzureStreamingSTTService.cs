@@ -97,22 +97,18 @@ public class AzureStreamingSTTService : IStreamingSTTService
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+    /// <summary>
+    /// Process audio stream with the specified language for transcription
+    /// </summary>
+    public async IAsyncEnumerable<TranscriptionResult> ProcessStreamAsync(
         ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
+        string language,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("🌍 Azure STT Auto-Detection with candidates: [{Languages}]", string.Join(", ", candidateLanguages));
-        Console.WriteLine($"🌍 AZURE STT: Auto-Detection starting with {candidateLanguages.Length} candidate languages");
+        _logger.LogInformation("🌍 Azure STT Processing for language: {Language}", language);
+        Console.WriteLine($"🌍 AZURE STT: Starting processing for language: {language}");
         
-        // For now, fallback to single language mode with first candidate
-        // Azure auto-detection would require more complex implementation
-        var primaryLanguage = candidateLanguages.FirstOrDefault() ?? "en-US";
-        
-        Console.WriteLine($"🌍 AZURE STT: Using {primaryLanguage} as fallback (full auto-detection not implemented)");
-        _logger.LogWarning("Azure auto-detection not fully implemented, using {Language} as fallback", primaryLanguage);
-        
-        await foreach (var result in ProcessAzureStreamingAsync(audioStream, primaryLanguage, cancellationToken))
+        await foreach (var result in ProcessAzureStreamingAsync(audioStream, language, cancellationToken))
         {
             yield return result;
         }

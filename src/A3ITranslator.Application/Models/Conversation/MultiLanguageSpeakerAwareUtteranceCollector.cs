@@ -13,7 +13,6 @@ public class UtteranceCollector
     // Core collection state
     private readonly List<string> _finalUtterances = new();
     private readonly List<TranscriptionResult> _allResults = new();
-    private readonly Dictionary<string, int> _languageVotes = new();
     private readonly List<float> _confidenceScores = new();
     
     // Current processing state
@@ -75,15 +74,13 @@ public class UtteranceCollector
     /// Get complete utterance with resolved languages and speaker context
     /// </summary>
     public UtteranceWithContext GetCompleteUtterance(
-        string[] candidateLanguages, 
-        string sessionPrimaryLanguage)
+        string processingLanguage,
+        string secondaryLanguage)
     {
         if (!_isCompleted || !_finalUtterances.Any())
             throw new InvalidOperationException("Utterance not completed or no content available");
 
-        var dominantLanguage = ResolveDominantLanguage();
-        var (sourceLanguage, targetLanguage) = ResolveSourceTargetLanguages(
-            dominantLanguage, candidateLanguages, sessionPrimaryLanguage);
+        var (sourceLanguage, targetLanguage) = ResolveSourceTargetLanguages(processingLanguage, secondaryLanguage);
         var averageConfidence = CalculateAverageConfidence();
 
         return new UtteranceWithContext
@@ -91,7 +88,7 @@ public class UtteranceCollector
             Text = GetAccumulatedText(),
             SourceLanguage = sourceLanguage,
             TargetLanguage = targetLanguage,
-            DominantLanguage = dominantLanguage,
+            DominantLanguage = processingLanguage,
             TranscriptionConfidence = averageConfidence,
             ProvisionalSpeakerId = _provisionalSpeakerId,
             SpeakerConfidence = _speakerMatchConfidence,
@@ -140,13 +137,13 @@ public class UtteranceCollector
     public int UtteranceCount => _finalUtterances.Count;
 
     /// <summary>
+    /// <summary>
     /// Reset collector for new utterance
     /// </summary>
     public void Reset()
     {
         _finalUtterances.Clear();
         _currentInterimText = string.Empty;
-        _languageVotes.Clear();
         _allResults.Clear();
         _confidenceScores.Clear();
         _provisionalSpeakerId = null;
@@ -159,13 +156,14 @@ public class UtteranceCollector
 
     /// <summary>
     /// Process final transcription result
+    /// <summary>
+    /// Process final result from STT
     /// </summary>
     private void ProcessFinalResult(TranscriptionResult result)
     {
         if (!string.IsNullOrWhiteSpace(result.Text))
         {
             _finalUtterances.Add(result.Text.Trim());
-            TrackLanguageVote(result.Language);
         }
         _currentInterimText = string.Empty;
     }
@@ -176,64 +174,17 @@ public class UtteranceCollector
     private void UpdateInterimResult(TranscriptionResult result)
     {
         _currentInterimText = result.Text ?? string.Empty;
-        TrackLanguageVote(result.Language);
     }
 
     /// <summary>
-    /// Track language votes for dominant language resolution
-    /// </summary>
-    private void TrackLanguageVote(string language)
-    {
-        if (string.IsNullOrWhiteSpace(language)) return;
-        _languageVotes[language] = _languageVotes.GetValueOrDefault(language, 0) + 1;
-    }
-
-    /// <summary>
-    /// Resolve the dominant language based on voting
-    /// </summary>
-    private string ResolveDominantLanguage()
-    {
-        if (_languageVotes.Count == 0)
-            return _allResults.FirstOrDefault()?.Language ?? "en-US";
-
-        return _languageVotes
-            .OrderByDescending(kvp => kvp.Value)
-            .First()
-            .Key;
-    }
-
-    /// <summary>
-    /// Resolve source and target languages based on dominant language and candidates
+    /// Resolve source and target languages based on processing and secondary language
     /// </summary>
     private (string sourceLanguage, string targetLanguage) ResolveSourceTargetLanguages(
-        string dominantLanguage, 
-        string[] candidateLanguages, 
-        string sessionPrimaryLanguage)
+        string processingLanguage, 
+        string secondaryLanguage)
     {
-        // Rule 1: Dominant language is in candidates
-        if (candidateLanguages.Contains(dominantLanguage))
-        {
-            var otherCandidates = candidateLanguages.Where(c => c != dominantLanguage).ToArray();
-            var targetLanguage = otherCandidates.FirstOrDefault() ?? sessionPrimaryLanguage;
-            return (dominantLanguage, targetLanguage);
-        }
-
-        // Rule 2: Check if secondary detected language is in candidates
-        var secondaryLanguage = _languageVotes
-            .Where(kvp => kvp.Key != dominantLanguage)
-            .OrderByDescending(kvp => kvp.Value)
-            .FirstOrDefault()
-            .Key;
-
-        if (!string.IsNullOrEmpty(secondaryLanguage) && candidateLanguages.Contains(secondaryLanguage))
-        {
-            var otherCandidates = candidateLanguages.Where(c => c != secondaryLanguage).ToArray();
-            var targetLanguage = otherCandidates.FirstOrDefault() ?? sessionPrimaryLanguage;
-            return (secondaryLanguage, targetLanguage);
-        }
-
-        // Rule 3: Fallback - use detected as source, session primary as target
-        return (dominantLanguage, sessionPrimaryLanguage);
+        // Simple rule: processing language is source, secondary is target
+        return (processingLanguage, secondaryLanguage);
     }
 
     /// <summary>

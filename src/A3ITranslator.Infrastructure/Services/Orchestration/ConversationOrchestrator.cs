@@ -98,6 +98,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
             // FILTERABLE: Starting completely new conversation cycle
             Console.WriteLine($"TIMESTAMP_NEW_CYCLE_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting new conversation cycle");
             
+            // 🔄 REFRESH CHANNEL: Synchronously reset for immediate writing
+            state.ResetAudioChannel();
+            
             state.StartReceivingAudio();
             
             // Write the triggering chunk to start the stream
@@ -125,7 +128,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
     /// <summary>
     /// Signal utterance completion from frontend VAD
-    /// Triggers processing of the accumulated utterance through GenAI and TTS
+    /// ELEGANT APPROACH: Close stream and let STT finish naturally
     /// </summary>
     public async Task CompleteUtteranceAsync(string connectionId)
     {
@@ -133,24 +136,15 @@ public class ConversationOrchestrator : IConversationOrchestrator
         
         _logger.LogInformation("🔇 Frontend VAD: Utterance completion signal received for {ConnectionId}", connectionId);
         
-        // ⚡ SMART APPROACH: Signal utterance completion first
-        Console.WriteLine($"TIMESTAMP_UTTERANCE_COMPLETION_SIGNAL: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Marking utterance as completed");
+        Console.WriteLine($"TIMESTAMP_UTTERANCE_COMPLETION_SIGNAL: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Frontend VAD detected silence");
+        
+        // Mark utterance as completed (stops winner monitoring loop)
         state.CompleteUtterance();
         
-        // ⚡ SURGICAL CANCELLATION: Cancel only STT processing, leave audio stream intact
-        Console.WriteLine($"TIMESTAMP_STT_CANCELLATION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Cancelling STT processing for immediate completion");
-        state.CancelCurrentCycle(); // This will stop STT processing gracefully
+        _logger.LogDebug("✅ Utterance completion marked for {ConnectionId}. Pipeline will drain lingering chunks.", connectionId);
         
-        // ⚡ IMMEDIATE PROCESSING: Start processing immediately with accumulated transcription
-        if (state.HasAccumulatedText && !state.IsProcessingStarted)
-        {
-            state.IsProcessingStarted = true; // Prevent double processing
-            Console.WriteLine($"TIMESTAMP_IMMEDIATE_PROCESSING_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting immediate utterance processing");
-            var rollingFingerprint = new AudioFingerprint(); // Create minimal fingerprint
-            await ProcessUtteranceWithTransition(connectionId, state, "Frontend VAD (Immediate)", rollingFingerprint);
-        }
-        
-        _logger.LogDebug("✅ Utterance processed immediately for {ConnectionId}", connectionId);
+        // Processing will happen in ProcessConversationPipelineAsync after grace period
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -216,27 +210,29 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
             // 1. Create fan-out channels (temporary for this cycle)
             // 1. Create fan-out channels (temporary for this cycle)
-            var sttChannel = Channel.CreateUnbounded<byte[]>();
+            var sttPrimaryChannel = Channel.CreateUnbounded<byte[]>();
+            var sttSecondaryChannel = Channel.CreateUnbounded<byte[]>();
             
             // ✨ NEW: Background Rolling Feature Accumulator (Zero Latency)
             var rollingFingerprint = new AudioFingerprint();
 
             // 2. Start parallel processing tasks
             // CRITICAL: Start broadcaster FIRST so audio flows to channels before consumers start
-            Console.WriteLine($"TASK_START_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting broadcaster task");
-            var broadcasterTask = BroadcastAudioAsync(
+            Console.WriteLine($"TASK_START_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting dual broadcaster task");
+            var broadcasterTask = BroadcastAudioToDualChannelsAsync(
                 state.AudioStreamChannel.Reader, 
-                sttChannel, 
+                sttPrimaryChannel, 
+                sttSecondaryChannel,
                 rollingFingerprint, // Pass accumulator
                 connectionId, 
                 cycleCts.Token);
             
-            Console.WriteLine($"TASK_START_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting STT task");
-            var sttTask = ProcessSTTWithSpeakerContextAsync(sttChannel.Reader, state, connectionId, cycleCts.Token);
+            Console.WriteLine($"TASK_START_ProcessDualSTTWithUtteranceManagersAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting STT task");
+            var sttTask = ProcessDualSTTWithUtteranceManagersAsync(sttPrimaryChannel.Reader, sttSecondaryChannel.Reader, state, connectionId, cycleCts.Token);
 
             _logger.LogDebug("📡 ORCHESTRATOR: Started broadcaster and consumer tasks for {ConnectionId}", connectionId);
 
-            // 3. ⚡ SMART WAITING: Wait for STT completion OR utterance completion (don't wait for broadcaster)
+            // 3. ⚡ SMART WAITING: Wait for STT completion OR utterance completion
             Console.WriteLine($"TASK_WAIT_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting for STT completion or utterance completion");
             
             // Create a completion task that triggers when utterance is marked complete
@@ -246,37 +242,53 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 {
                     await Task.Delay(50, cycleCts.Token); // Fast polling for utterance completion
                 }
+                Console.WriteLine($"TASK_WAIT_END: {DateTime.UtcNow:HH:mm:ss.fff} - Utterance completion detected");
             });
-            
-            // Wait for EITHER STT task completion OR utterance completion (NOT broadcaster)
+
+            // Wait for EITHER STT task completion OR utterance completion
             await Task.WhenAny(sttTask, utteranceCompletionTask);
             Console.WriteLine($"TASK_WAIT_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT task or utterance completed");
 
-            // Cancel everything immediately
-            if (!cycleCts.IsCancellationRequested) cycleCts.Cancel();
-            
-  
+            // If utterance was completed by frontend VAD, catch lingering chunks then close
+            if (state.IsUtteranceCompleted)
+            {
+                // 🎨 GRACE PERIOD: Wait 500ms for any late chunks from the network
+                Console.WriteLine($"TIMESTAMP_GRACE_PERIOD_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting 500ms for lingering chunks");
+                await Task.Delay(500);
+                
+                // Now safely close the channel
+                state.AudioStreamChannel.Writer.TryComplete();
+                Console.WriteLine($"TIMESTAMP_STREAM_CLOSED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Audio stream closed after grace period");
+                
+                Console.WriteLine($"TIMESTAMP_WAITING_FOR_WINNER_ADOPTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting for winner adoption to complete");
+                
+                // Wait longer (up to 3 seconds) for the full STT cloud response to arrive
+                var waitTask = Task.WhenAny(sttTask, Task.Delay(3000, cycleCts.Token));
+                await waitTask;
+                
+                Console.WriteLine($"TIMESTAMP_WINNER_ADOPTION_WAIT_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Winner adoption wait complete, HasAccumulatedText: {state.HasAccumulatedText}");
+            }
 
-            // 5. ⚡ PROCESSING OPTIMIZATION: Process immediately if utterance is complete
+            // Cancel remaining tasks
+            if (!cycleCts.IsCancellationRequested) cycleCts.Cancel();
+
+            // 4. ⚡ PROCESSING OPTIMIZATION: Process immediately if we have valid utterance data
             if (state.IsUtteranceCompleted && state.HasAccumulatedText && !state.IsProcessingStarted)
             {
                 state.IsProcessingStarted = true; // Prevent double processing
-                // 🎯 FRONTEND VAD: Frontend explicitly signaled completion
                 _logger.LogInformation("🎯 Frontend VAD completion detected - processing utterance immediately for {ConnectionId}", connectionId);
                 await ProcessUtteranceWithTransition(connectionId, state, "Frontend VAD Signal", rollingFingerprint);
             }
             else if (!state.IsUtteranceCompleted && state.HasAccumulatedText && !state.IsProcessingStarted)
             {
                 state.IsProcessingStarted = true; // Prevent double processing
-                // 🔄 STT CHANNEL CLOSED: We have text but no explicit frontend signal - still process it
-                // This happens when STT completes naturally or client disconnects
                 _logger.LogInformation("🔄 STT channel closed with text but no frontend signal - auto-completing utterance for {ConnectionId}", connectionId);
                 state.CompleteUtterance(); // Mark as completed
                 await ProcessUtteranceWithTransition(connectionId, state, "Auto-completion (STT ended)", rollingFingerprint);
             }
-            else if (state.IsProcessingStarted)
+            else
             {
-                _logger.LogDebug("✅ Utterance already being processed by CompleteUtteranceAsync for {ConnectionId}", connectionId);
+                _logger.LogDebug("✅ No accumulated text to process for {ConnectionId}", connectionId);
             }
         }
         catch (OperationCanceledException)
@@ -314,11 +326,12 @@ public class ConversationOrchestrator : IConversationOrchestrator
     }
 
     /// <summary>
-    /// Broadcast audio to multiple processing channels
+    /// Broadcast audio to dual STT processing channels for language competition
     /// </summary>
-    private async Task BroadcastAudioAsync(
+    private async Task BroadcastAudioToDualChannelsAsync(
         ChannelReader<byte[]> audioReader, 
-        Channel<byte[]> sttChannel, 
+        Channel<byte[]> primaryChannel,
+        Channel<byte[]> secondaryChannel,
         AudioFingerprint fingerprintAccumulator,
         string connectionId,
         CancellationToken cancellationToken)
@@ -326,7 +339,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         var chunkCount = 0;
         try
         {
-            Console.WriteLine($"TASK_START_BroadcastAudioAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster starting audio processing");
+            Console.WriteLine($"TASK_START_BroadcastAudioToDualChannelsAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual broadcaster starting audio processing");
             
             // Read until channel is closed OR until this cycle is cancelled (VAD detected)
             while (await audioReader.WaitToReadAsync(cancellationToken))
@@ -334,78 +347,314 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 while (audioReader.TryRead(out var chunk))
                 {
                     chunkCount++;
-                    await sttChannel.Writer.WriteAsync(chunk, cancellationToken);
+                    
+                    // 🎯 DUPLICATE AUDIO: Send same chunk to both STT channels for language competition
+                    await primaryChannel.Writer.WriteAsync(chunk, cancellationToken);
+                    await secondaryChannel.Writer.WriteAsync(chunk, cancellationToken);
                     
                     // ✨ Background Feature Extraction (Zero Latency)
                     _ = _featureExtractor.AccumulateFeaturesAsync(chunk, fingerprintAccumulator);
                 }
             }
-            Console.WriteLine($"TASK_END_BroadcastAudioAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster completed normally");
+            Console.WriteLine($"TASK_END_BroadcastAudioToDualChannelsAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual broadcaster completed normally after {chunkCount} chunks");
         }
         catch (OperationCanceledException)
         {
-            Console.WriteLine($"TASK_CANCELLED_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster cancelled after {chunkCount} chunks");
-            _logger.LogDebug("🎬 BROADCASTER: Cycle cancelled after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
+            Console.WriteLine($"TASK_CANCELLED_BroadcastAudioToDualChannelsAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual broadcaster cancelled after {chunkCount} chunks");
+            _logger.LogDebug("🎬 DUAL BROADCASTER: Cycle cancelled after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"TASK_ERROR_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster error after {chunkCount} chunks: {ex.Message}");
-            _logger.LogError(ex, "❌ BROADCASTER: Error after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
+            Console.WriteLine($"TASK_ERROR_BroadcastAudioToDualChannelsAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual broadcaster error after {chunkCount} chunks: {ex.Message}");
+            _logger.LogError(ex, "❌ DUAL BROADCASTER: Error after {ChunkCount} chunks for {ConnectionId}", chunkCount, connectionId);
         }
         finally
         {
-            sttChannel.Writer.TryComplete();
-            Console.WriteLine($"TASK_FINALLY_BroadcastAudioAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Broadcaster cleanup completed");
+            primaryChannel.Writer.TryComplete();
+            secondaryChannel.Writer.TryComplete();
+            Console.WriteLine($"TASK_FINALLY_BroadcastAudioToDualChannelsAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual broadcaster cleanup completed");
         }
     }
 
     /// <summary>
-    /// Process STT with speaker context and language resolution
+    /// 🎯 DUAL UTTERANCE MANAGERS: Process both primary and secondary languages in parallel
+    /// Winner selection based on confidence, loser gets stopped immediately
     /// </summary>
-    private async Task ProcessSTTWithSpeakerContextAsync(
-        ChannelReader<byte[]> audioReader,
+    private async Task ProcessDualSTTWithUtteranceManagersAsync(
+        ChannelReader<byte[]> primaryAudioReader,
+        ChannelReader<byte[]> secondaryAudioReader,
         ConversationState state,
         string connectionId,
         CancellationToken cancellationToken)
     {
         try
         {
-            Console.WriteLine($"TASK_START_ProcessSTTWithSpeakerContextAsync_EXECUTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT processing starting");
+            Console.WriteLine($"TASK_START_ProcessDualSTTWithUtteranceManagersAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting dual STT processing for Primary: {state.PrimaryLanguage}, Secondary: {state.SecondaryLanguage}");
             
-            await foreach (var result in _sttService.ProcessAutoLanguageDetectionAsync(audioReader, state.CandidateLanguages, cancellationToken))
+            // 🎯 CREATE DUAL UTTERANCE MANAGERS
+            var primaryUtteranceManager = new LanguageSpecificUtteranceManager(state.PrimaryLanguage!, "Primary");
+            var secondaryUtteranceManager = new LanguageSpecificUtteranceManager(state.SecondaryLanguage!, "Secondary");
+            
+            // 🎯 DUAL STT PROCESSING: Both languages compete in parallel
+            var primaryTask = ProcessSingleLanguageSTTAsync(primaryAudioReader, state.PrimaryLanguage!, primaryUtteranceManager, connectionId, cancellationToken);
+            var secondaryTask = ProcessSingleLanguageSTTAsync(secondaryAudioReader, state.SecondaryLanguage!, secondaryUtteranceManager, connectionId, cancellationToken);
+            
+            Console.WriteLine($"TIMESTAMP_DUAL_STT_STARTED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Both STT streams started, monitoring for winner");
+            
+            // 🎯 WINNER MONITORING: Wait for first significant result with high confidence
+            var winnerSelected = false;
+            var loserCts = new CancellationTokenSource();
+            Task? winnerTask = null; // Track which task won
+            
+            // 🚀 PARALLEL TASK EXECUTION: Start both STT tasks and monitor for winner
+            var winnerMonitoringTask = Task.Run(async () =>
             {
-                // ⚡ SMART FILTER: Stop processing STT results after utterance completion
-                if (state.IsUtteranceCompleted)
+                while (!cancellationToken.IsCancellationRequested && !winnerSelected)
                 {
-                    Console.WriteLine($"TIMESTAMP_STT_RESULT_IGNORED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Ignoring STT result after utterance completion: '{result.Text}'");
-                    break; // Stop processing new STT results gracefully
+                    // Check if utterance was completed by frontend VAD
+                    if (state.IsUtteranceCompleted && !winnerSelected)
+                    {
+                        // 🔥 CRITICAL: Do ONE FINAL winner check before exiting
+                        Console.WriteLine($"TIMESTAMP_FINAL_WINNER_CHECK: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Utterance completed, doing final winner evaluation");
+                        
+                        var primaryFinal = primaryUtteranceManager.IsWinnerCandidate();
+                        var secondaryFinal = secondaryUtteranceManager.IsWinnerCandidate();
+                        
+                        if (primaryFinal || secondaryFinal)
+                        {
+                            var winner = primaryFinal && secondaryFinal ? 
+                                (primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence() ? primaryUtteranceManager : secondaryUtteranceManager) :
+                                (primaryFinal ? primaryUtteranceManager : secondaryUtteranceManager);
+                            
+                            // Track which task is the winner
+                            winnerTask = winner == primaryUtteranceManager ? primaryTask : secondaryTask;
+                            
+                            Console.WriteLine($"TIMESTAMP_FINAL_WINNER_SELECTED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - FINAL WINNER: {winner.LanguageCode} with confidence {winner.GetConfidence():F2}, text: '{winner.GetBestText()}'");
+                            state.AdoptWinnerResults(winner);
+                            winnerSelected = true;
+                        }
+                        else
+                        {
+                            // No winner yet, try to pick the best manager we have
+                            var bestManager = primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence() 
+                                ? primaryUtteranceManager 
+                                : secondaryUtteranceManager;
+                            
+                            if (bestManager.GetAllResults().Any())
+                            {
+                                // Track which task is the winner
+                                winnerTask = bestManager == primaryUtteranceManager ? primaryTask : secondaryTask;
+                                
+                                Console.WriteLine($"TIMESTAMP_FALLBACK_ADOPTION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - No clear winner, adopting best: {bestManager.LanguageCode}");
+                                state.AdoptWinnerResults(bestManager);
+                                winnerSelected = true;
+                            }
+                        }
+                        
+                        break; // Exit monitoring after final check
+                    }
+                    
+                    await Task.Delay(100, cancellationToken); // Fast polling for winner selection
+                    
+                    // 🏆 CHECK FOR WINNER: High confidence result with substantial text
+                    var primaryWinner = primaryUtteranceManager.IsWinnerCandidate();
+                    var secondaryWinner = secondaryUtteranceManager.IsWinnerCandidate();
+                    
+                    // 🎯 DEBUG: Log winner evaluation details
+                    if (primaryWinner || secondaryWinner)
+                    {
+                        Console.WriteLine($"TIMESTAMP_WINNER_EVALUATION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Primary: IsWinner={primaryWinner}, Confidence={primaryUtteranceManager.GetConfidence():F2}, Text='{primaryUtteranceManager.GetBestText()}'");
+                        Console.WriteLine($"TIMESTAMP_WINNER_EVALUATION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Secondary: IsWinner={secondaryWinner}, Confidence={secondaryUtteranceManager.GetConfidence():F2}, Text='{secondaryUtteranceManager.GetBestText()}'");
+                    }
+                    
+                    if (primaryWinner || secondaryWinner)
+                    {
+                        var winner = primaryWinner && secondaryWinner ? 
+                            (primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence() ? primaryUtteranceManager : secondaryUtteranceManager) :
+                            (primaryWinner ? primaryUtteranceManager : secondaryUtteranceManager);
+                        
+                        var loser = winner == primaryUtteranceManager ? secondaryUtteranceManager : primaryUtteranceManager;
+                        
+                        // Track which task is the winner
+                        winnerTask = winner == primaryUtteranceManager ? primaryTask : secondaryTask;
+                        
+                        Console.WriteLine($"TIMESTAMP_WINNER_SELECTED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - WINNER: {winner.LanguageCode} ({winner.Name}) with confidence {winner.GetConfidence():F2}, text: '{winner.GetBestText()}'");
+                        Console.WriteLine($"TIMESTAMP_LOSER_STOPPED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STOPPING: {loser.LanguageCode} ({loser.Name}) with confidence {loser.GetConfidence():F2}");
+                        
+                        // 🎯 WINNER SELECTION: Transfer winner's results to main state and stop loser
+                        Console.WriteLine($"TIMESTAMP_BEFORE_ADOPT_WINNER: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Before adopting winner, state.HasAccumulatedText: {state.HasAccumulatedText}");
+                        state.AdoptWinnerResults(winner);
+                        Console.WriteLine($"TIMESTAMP_AFTER_ADOPT_WINNER: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - After adopting winner, state.HasAccumulatedText: {state.HasAccumulatedText}");
+                        
+                        winnerSelected = true;
+                        
+                        // Stop the losing STT stream immediately
+                        loserCts.Cancel();
+                        
+                        // Continue monitoring only the winner for additional results
+                        await MonitorWinnerSTTAsync(winner, state, connectionId, cancellationToken);
+                        break;
+                    }
+                }
+            });
+
+            // 🎯 WINNER-FOCUSED TASK MANAGEMENT: Wait for completion and ensure results are processed
+            try
+            {
+                // Wait for winner selection OR any task completion
+                var firstCompleted = await Task.WhenAny(primaryTask, secondaryTask, winnerMonitoringTask);
+                
+                // If VAD triggered (IsUtteranceCompleted) but no winner yet, we MUST wait for STT tasks to finish
+                if (state.IsUtteranceCompleted && !winnerSelected)
+                {
+                    Console.WriteLine($"TIMESTAMP_VAD_DRAINING: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Utterance completed, draining STT tasks for final results");
+                    
+                    // Wait for both STT tasks to finish naturally (since stream is closed)
+                    // We give them a max of 2 seconds to get the final results from cloud
+                    using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await Task.WhenAll(primaryTask, secondaryTask);
+                    
+                    Console.WriteLine($"TIMESTAMP_STT_DRAINED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT tasks drained, performing last-second winner check");
+                    
+                    // 🎯 FINAL FALLBACK: If no winner was selected during live monitoring, pick the best one now
+                    if (!winnerSelected)
+                    {
+                        var primaryBest = primaryUtteranceManager.IsWinnerCandidate();
+                        var secondaryBest = secondaryUtteranceManager.IsWinnerCandidate();
+                        
+                        var fallbackWinner = primaryBest && secondaryBest ? 
+                            (primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence() ? primaryUtteranceManager : secondaryUtteranceManager) :
+                            (primaryBest ? primaryUtteranceManager : (secondaryBest ? secondaryUtteranceManager : null));
+                        
+                        // If still no "candidate" winner, just pick the one with better results
+                        if (fallbackWinner == null)
+                        {
+                            fallbackWinner = (primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence())
+                                ? primaryUtteranceManager
+                                : secondaryUtteranceManager;
+                        }
+
+                        if (fallbackWinner.GetAllResults().Any())
+                        {
+                            Console.WriteLine($"TIMESTAMP_FALLBACK_WINNER_SELECTED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Picked fallback winner: {fallbackWinner.LanguageCode}");
+                            state.AdoptWinnerResults(fallbackWinner);
+                            winnerSelected = true;
+                        }
+                    }
                 }
                 
-                Console.WriteLine($"TIMESTAMP_STT_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Text: '{result.Text}' - IsFinal: {result.IsFinal}");
-                state.AddTranscriptionResult(result);
-                
-                // Send live transcription updates to frontend
-                var displayText = state.GetCurrentDisplayText();
-                Console.WriteLine($"TIMESTAMP_FRONTEND_TRANSCRIPTION_SEND: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending to frontend: '{displayText}'");
-                await _notificationService.NotifyTranscriptionAsync(connectionId, displayText, result.Language, false);
+                // If a winner was already selected during the loop, wait for that specific winner to finish
+                if (winnerSelected && winnerTask != null)
+                {
+                    Console.WriteLine($"TIMESTAMP_WAITING_FOR_WINNER_COMPLETION: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Waiting for winner task to finalize");
+                    await winnerTask;
+                }
             }
+            catch (OperationCanceledException)
+            {
+                // Expected when frontend VAD triggers or cycle ends
+                loserCts.Cancel(); // Ensure loser is stopped
+            }
+            
+            Console.WriteLine($"TIMESTAMP_DUAL_STT_MONITORING_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual STT monitoring completed, WinnerSelected={winnerSelected}");
         }
         catch (OperationCanceledException) 
         { 
-            Console.WriteLine($"TASK_CANCELLED_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT task cancelled (expected on utterance completion)");
-            _logger.LogDebug("🔇 STT processing cancelled for {ConnectionId} (expected behavior)", connectionId);
-        }
-        catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.Aborted && ex.Status.Detail.Contains("Stream timed out"))
-        {
-            Console.WriteLine($"TASK_TIMEOUT_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Google STT timeout (expected when utterance completed early)");
-            _logger.LogDebug("⏰ Google STT timeout for {ConnectionId} - this is expected when utterance completion happens before natural STT end", connectionId);
-            // This is expected behavior when we call CompleteUtterance() - not an error
+            Console.WriteLine($"TASK_CANCELLED_ProcessDualSTTWithUtteranceManagersAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual STT task cancelled (expected on utterance completion)");
+            _logger.LogDebug("🔇 Dual STT processing cancelled for {ConnectionId} (expected behavior)", connectionId);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"TASK_ERROR_ProcessSTTWithSpeakerContextAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - STT task error: {ex.Message}");
+            Console.WriteLine($"TASK_ERROR_ProcessDualSTTWithUtteranceManagersAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Dual STT error: {ex.Message}");
             if (!cancellationToken.IsCancellationRequested)
-                _logger.LogError(ex, "❌ STT processing error for {ConnectionId}", connectionId);
+                _logger.LogError(ex, "❌ Dual STT processing error for {ConnectionId}", connectionId);
+        }
+    }
+
+    /// <summary>
+    /// Process STT for a single language and feed results to utterance manager
+    /// </summary>
+    private async Task ProcessSingleLanguageSTTAsync(
+        ChannelReader<byte[]> audioReader,
+        string language,
+        LanguageSpecificUtteranceManager utteranceManager,
+        string connectionId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Console.WriteLine($"TASK_START_ProcessSingleLanguageSTTAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting {utteranceManager.Name} STT for {language}");
+            
+            Console.WriteLine($"TIMESTAMP_FOREACH_START_{utteranceManager.Name.ToUpper()}: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name} starting to consume STT results");
+            
+            await foreach (var result in _sttService.ProcessStreamAsync(audioReader, language, cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    Console.WriteLine($"TIMESTAMP_STT_CANCELLED: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name} STT cancelled");
+                    break;
+                }
+                
+                Console.WriteLine($"TIMESTAMP_STT_RESULT_{utteranceManager.Name.ToUpper()}: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name}: '{result.Text}' IsFinal: {result.IsFinal}, Confidence: {result.Confidence:F2}");
+                
+                // Feed result to language-specific utterance manager
+                utteranceManager.AddResult(result);
+            }
+            
+            Console.WriteLine($"TIMESTAMP_FOREACH_END_{utteranceManager.Name.ToUpper()}: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name} finished consuming STT results");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"TASK_CANCELLED_ProcessSingleLanguageSTTAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name} STT cancelled (expected when loser)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"TASK_ERROR_ProcessSingleLanguageSTTAsync: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - {utteranceManager.Name} STT error: {ex.Message}");
+            _logger.LogError(ex, "❌ {LanguageName} STT error for {ConnectionId}", utteranceManager.Name, connectionId);
+        }
+    }
+
+    /// <summary>
+    /// Continue monitoring the winning STT stream until completion
+    /// </summary>
+    private async Task MonitorWinnerSTTAsync(
+        LanguageSpecificUtteranceManager winner,
+        ConversationState state,
+        string connectionId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Console.WriteLine($"TIMESTAMP_WINNER_MONITORING_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Monitoring winner {winner.Name} for continued results");
+            
+            while (!cancellationToken.IsCancellationRequested && !state.IsUtteranceCompleted)
+            {
+                await Task.Delay(50, cancellationToken); // Fast polling
+                
+                // Check for new results from winner and sync to state
+                if (winner.HasNewResults())
+                {
+                    var newResults = winner.GetAndClearNewResults();
+                    Console.WriteLine($"TIMESTAMP_WINNER_NEW_RESULTS: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Winner has {newResults.Count} new results to sync");
+                    
+                    foreach (var result in newResults)
+                    {
+                        Console.WriteLine($"TIMESTAMP_WINNER_SYNC_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Syncing result: '{result.Text}' IsFinal: {result.IsFinal}");
+                        state.AddTranscriptionResult(result);
+                        
+                        // Send live updates to frontend
+                        var displayText = state.GetCurrentDisplayText();
+                        Console.WriteLine($"TIMESTAMP_WINNER_FRONTEND_UPDATE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Sending winner update: '{displayText}', HasAccumulatedText: {state.HasAccumulatedText}");
+                        await _notificationService.NotifyTranscriptionAsync(connectionId, displayText, result.Language, false);
+                    }
+                }
+            }
+            
+            Console.WriteLine($"TIMESTAMP_WINNER_MONITORING_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Winner monitoring completed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Winner monitoring error for {ConnectionId}", connectionId);
         }
     }
 
@@ -637,7 +886,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     translationResponse.AIAssistance.Response??string.Empty,
                     translationResponse.AIAssistance.ResponseTranslated,
                     translationResponse.TranslationLanguage ?? "en",
-                    1.0f, // AI response assumed high confidence
+                    1.0f // AI response assumed high confidence
                 );
             }
 
@@ -966,71 +1215,70 @@ public class ConversationOrchestrator : IConversationOrchestrator
         }
     }
 
-    // --- Legacy / Infrastructure Interfaces ---
-    public Task<ConversationResult> ProcessTranscriptionAsync(string c, string t, string d, float f, CancellationToken ct = default) => Task.FromResult(new ConversationResult { Success = true });
-    public Task<bool> ProcessGeneratedResponseAsync(string c, ConversationItem i, CancellationToken ct = default) => Task.FromResult(true);
-    public Task CompleteConversationCycleAsync(string c, string i, CancellationToken ct = default) => Task.CompletedTask;
-    public Task HandleConversationErrorAsync(string c, string e, ConversationErrorSeverity s, CancellationToken ct = default) => Task.CompletedTask;
-    public Task<bool> ProcessTTSResponseAsync(string c, ConversationItem i, CancellationToken ct = default) => Task.FromResult(true);
-    public Task<bool> NotifyCycleCompletionAsync(string c, CancellationToken ct = default) { _notificationService.NotifyCycleCompletionAsync(c, false); return Task.FromResult(true); }
+    // --- Required Interface Methods ---
+    public Task<ConversationResult> ProcessTranscriptionAsync(string connectionId, string transcription, string detectedLanguage, float confidence, CancellationToken cancellationToken = default) 
+        => Task.FromResult(new ConversationResult { Success = true });
+    
+    public Task<bool> ProcessGeneratedResponseAsync(string connectionId, ConversationItem conversationItem, CancellationToken cancellationToken = default) 
+        => Task.FromResult(true);
+    
+    public Task CompleteConversationCycleAsync(string connectionId, string conversationItemId, CancellationToken cancellationToken = default) 
+        => Task.CompletedTask;
+    
+    public Task HandleConversationErrorAsync(string connectionId, string error, ConversationErrorSeverity severity, CancellationToken cancellationToken = default) 
+        => Task.CompletedTask;
 }
 
-public class ConversationState : IDisposable
+/// <summary>
+/// 🎯 UTTERANCE MANAGER
+/// Manages transcription results, interim text, and utterance completion state
+/// Centralizes all utterance-related logic for better separation of concerns
+/// </summary>
+public class UtteranceManager
 {
-    public string ConnectionId { get; }
-    public Channel<byte[]> AudioStreamChannel { get; } = Channel.CreateUnbounded<byte[]>();
-    public ConversationPhase CycleState { get; set; } = ConversationPhase.Ready;
-    public string? SessionId { get; private set; }
-    public string? PrimaryLanguage { get; private set; }
-    public string? SecondaryLanguage { get; private set; }
-    public string? LastSpeakerId { get; set; } // For Room Memory
-    
-    // ⚡ IMMEDIATE CANCELLATION: Store cancellation token for instant STT stopping
-    public CancellationTokenSource? CurrentCycleCts { get; set; }
-    
-    // ⚡ DOUBLE-PROCESSING PREVENTION: Track if utterance is already being processed
-    public bool IsProcessingStarted { get; set; } = false;
-    
-    // ✅ SIMPLIFIED: Direct utterance state (no separate collector needed)
     public List<string> FinalUtterances { get; } = new();
     public List<TranscriptionResult> AllResults { get; } = new();
-    public Dictionary<string, int> LanguageVotes { get; } = new();
     public List<float> ConfidenceScores { get; } = new();
     public string CurrentInterimText { get; set; } = string.Empty;
     public bool IsUtteranceCompleted { get; set; } = false;
-    public string? ProvisionalSpeakerId { get; set; }
-    public float SpeakerMatchConfidence { get; set; } = 0f;
-    public AudioFingerprint? AccumulatedAudioFingerprint { get; set; }
     
-    public string[] CandidateLanguages => new[] { PrimaryLanguage ?? "en-US", SecondaryLanguage ?? "en-GB" };
+    private readonly string _connectionId;
     
-    // STRICT DESIGN: Only accept audio when Ready (new cycle) or actively receiving (before VAD timeout)
-    // Once VAD triggers ProcessingUtterance/SendingResponse, reject ALL new chunks until cycle completes
-    public bool CanAcceptAudio => CycleState == ConversationPhase.Ready || CycleState == ConversationPhase.ReceivingAudio;
-    
-    public bool ShouldStartNewCycle => CycleState == ConversationPhase.Ready;
-    
-    public bool HasAccumulatedText => FinalUtterances.Any();
-    
-    public ConversationState(string connectionId) => ConnectionId = connectionId;
-
-    public void CacheSessionConfig(string sessionId, string primary, string secondary)
+    public UtteranceManager(string connectionId)
     {
-        SessionId = sessionId;
-        PrimaryLanguage = primary;
-        SecondaryLanguage = secondary;
+        _connectionId = connectionId;
     }
-
+    
+    /// <summary>
+    /// Check if utterance has accumulated text for processing
+    /// </summary>
+    public bool HasAccumulatedText 
+    { 
+        get 
+        { 
+            var hasText = FinalUtterances.Any();
+            if (!hasText)
+            {
+                Console.WriteLine($"TIMESTAMP_HAS_ACCUMULATED_TEXT_FALSE: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - HasAccumulatedText=FALSE, FinalUtterances.Count={FinalUtterances.Count}, InterimText='{CurrentInterimText}'");
+            }
+            else
+            {
+                Console.WriteLine($"TIMESTAMP_HAS_ACCUMULATED_TEXT_TRUE: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - HasAccumulatedText=TRUE, FinalUtterances='{string.Join(" ", FinalUtterances)}'");
+            }
+            return hasText;
+        } 
+    }
+    
     /// <summary>
     /// Add transcription result from STT service
     /// </summary>
     public void AddTranscriptionResult(TranscriptionResult result)
     {
-        Console.WriteLine($"TIMESTAMP_TRANSCRIPTION_RECEIVED: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - STT result received: '{result.Text}' IsFinal: {result.IsFinal}");
+        Console.WriteLine($"TIMESTAMP_TRANSCRIPTION_RECEIVED: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - STT result received: '{result.Text}' IsFinal: {result.IsFinal}");
         
         if (IsUtteranceCompleted)
         {
-            Console.WriteLine($"TIMESTAMP_TRANSCRIPTION_IGNORED: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Ignoring STT result as utterance already completed");
+            Console.WriteLine($"TIMESTAMP_TRANSCRIPTION_IGNORED: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Ignoring STT result as utterance already completed");
             return; // Ignore results after completion
         }
 
@@ -1039,36 +1287,36 @@ public class ConversationState : IDisposable
 
         if (result.IsFinal)
         {
-            Console.WriteLine($"TIMESTAMP_FINAL_RESULT_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Processing final STT result");
+            Console.WriteLine($"TIMESTAMP_FINAL_RESULT_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Processing final STT result");
             ProcessFinalResult(result);
         }
         else
         {
-            Console.WriteLine($"TIMESTAMP_INTERIM_RESULT_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Processing interim STT result");
+            Console.WriteLine($"TIMESTAMP_INTERIM_RESULT_PROCESSING: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Processing interim STT result");
             UpdateInterimResult(result);
         }
     }
-
+    
     /// <summary>
     /// Signal utterance completion from frontend VAD
     /// </summary>
     public void CompleteUtterance()
     {
-        Console.WriteLine($"TIMESTAMP_COMPLETE_UTTERANCE_CALLED: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - CompleteUtterance() called by frontend VAD");
+        Console.WriteLine($"TIMESTAMP_COMPLETE_UTTERANCE_CALLED: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - CompleteUtterance() called by frontend VAD");
         
         IsUtteranceCompleted = true;
         
         // Add any pending interim text as final
         if (!string.IsNullOrWhiteSpace(CurrentInterimText))
         {
-            Console.WriteLine($"TIMESTAMP_INTERIM_TO_FINAL: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Converting interim text to final: '{CurrentInterimText}'");
+            Console.WriteLine($"TIMESTAMP_INTERIM_TO_FINAL: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Converting interim text to final: '{CurrentInterimText}'");
             FinalUtterances.Add(CurrentInterimText.Trim());
             CurrentInterimText = string.Empty;
         }
         
-        Console.WriteLine($"TIMESTAMP_COMPLETE_UTTERANCE_FINISHED: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - CompleteUtterance() finished, final utterances: {FinalUtterances.Count}");
+        Console.WriteLine($"TIMESTAMP_COMPLETE_UTTERANCE_FINISHED: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - CompleteUtterance() finished, final utterances: {FinalUtterances.Count}");
     }
-
+    
     /// <summary>
     /// Get current display text for real-time UI updates
     /// </summary>
@@ -1083,6 +1331,315 @@ public class ConversationState : IDisposable
         }
         return accumulated;
     }
+    
+    /// <summary>
+    /// Get accumulated text from final utterances
+    /// </summary>
+    public string GetAccumulatedText()
+    {
+        return string.Join(" ", FinalUtterances).Trim();
+    }
+    
+    /// <summary>
+    /// Calculate average confidence from all results
+    /// </summary>
+    public float CalculateAverageConfidence()
+    {
+        if (ConfidenceScores.Count == 0) return 0f;
+        return ConfidenceScores.Average();
+    }
+    
+    /// <summary>
+    /// Adopt winner's results from language-specific utterance manager
+    /// 🎯 CRITICAL: This method must properly transfer ALL winner's data including interim text
+    /// </summary>
+    public void AdoptWinnerResults(LanguageSpecificUtteranceManager winner)
+    {
+        Console.WriteLine($"TIMESTAMP_ADOPTING_WINNER: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Adopting results from {winner.Name} ({winner.LanguageCode})");
+        
+        // Clear existing results and adopt winner's
+        FinalUtterances.Clear();
+        AllResults.Clear();
+        ConfidenceScores.Clear();
+        CurrentInterimText = string.Empty;
+        
+        // Transfer all results from winner
+        foreach (var result in winner.GetAllResults())
+        {
+            AllResults.Add(result);
+            ConfidenceScores.Add((float)result.Confidence);
+            
+            if (result.IsFinal && !string.IsNullOrWhiteSpace(result.Text))
+            {
+                FinalUtterances.Add(result.Text.Trim());
+            }
+        }
+        
+        // 🚀 CRITICAL FIX: Get the best text from winner (final + interim combined)
+        var winnerBestText = winner.GetBestText();
+        Console.WriteLine($"TIMESTAMP_WINNER_BEST_TEXT: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Winner best text: '{winnerBestText}'");
+        
+        // 🚀 CRITICAL FIX: Set current interim text from winner
+        CurrentInterimText = winner.GetCurrentInterim();
+        
+        // 🚀 CRITICAL FIX: If we have good text but no final utterances, promote best text to final
+        // This ensures HasAccumulatedText returns true immediately after winner selection
+        if (!FinalUtterances.Any() && !string.IsNullOrWhiteSpace(winnerBestText))
+        {
+            Console.WriteLine($"TIMESTAMP_PROMOTING_BEST_TEXT_TO_FINAL: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - No final utterances, promoting best text to final: '{winnerBestText}'");
+            FinalUtterances.Add(winnerBestText.Trim());
+            // Keep interim text for live updates
+        }
+        else if (FinalUtterances.Any() && !string.IsNullOrWhiteSpace(CurrentInterimText))
+        {
+            // If we have both final utterances AND interim text, add interim to final for completeness
+            Console.WriteLine($"TIMESTAMP_ADDING_INTERIM_TO_FINALS: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Adding interim text to finals: '{CurrentInterimText}'");
+            FinalUtterances.Add(CurrentInterimText.Trim());
+        }
+        
+        Console.WriteLine($"TIMESTAMP_WINNER_ADOPTED: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - Adopted {AllResults.Count} results, {FinalUtterances.Count} final utterances from {winner.Name}");
+        Console.WriteLine($"TIMESTAMP_WINNER_ADOPTED_TEXT: {DateTime.UtcNow:HH:mm:ss.fff} - {_connectionId} - HasAccumulatedText: {HasAccumulatedText}, FinalText: '{string.Join(" ", FinalUtterances)}', InterimText: '{CurrentInterimText}'");
+    }
+    
+    /// <summary>
+    /// Reset utterance state for new conversation cycle
+    /// </summary>
+    public void ResetUtteranceState()
+    {
+        FinalUtterances.Clear();
+        CurrentInterimText = string.Empty;
+        AllResults.Clear();
+        ConfidenceScores.Clear();
+        IsUtteranceCompleted = false;
+    }
+    
+    /// <summary>
+    /// Process final transcription result
+    /// </summary>
+    public void ProcessFinalResult(TranscriptionResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.Text))
+        {
+            FinalUtterances.Add(result.Text.Trim());
+        }
+        CurrentInterimText = string.Empty;
+    }
+    
+    /// <summary>
+    /// Update interim transcription result
+    /// </summary>
+    public void UpdateInterimResult(TranscriptionResult result)
+    {
+        CurrentInterimText = result.Text ?? string.Empty;
+    }
+}
+
+/// <summary>
+/// 🎯 LANGUAGE-SPECIFIC UTTERANCE MANAGER
+/// Manages transcription results for a single language with confidence tracking
+/// Used in dual-language competition for winner selection
+/// </summary>
+public class LanguageSpecificUtteranceManager
+{
+    public string LanguageCode { get; }
+    public string Name { get; }
+    
+    private readonly List<TranscriptionResult> _allResults = new();
+    private readonly List<TranscriptionResult> _newResults = new();
+    private readonly List<string> _finalUtterances = new();
+    private string _currentInterim = string.Empty;
+    private readonly object _lock = new();
+    
+    // Winner selection criteria
+    private const float WINNER_CONFIDENCE_THRESHOLD = 0.7f;
+    private const int WINNER_MIN_TEXT_LENGTH = 10;
+    
+    public LanguageSpecificUtteranceManager(string languageCode, string name)
+    {
+        LanguageCode = languageCode;
+        Name = name;
+    }
+    
+    public void AddResult(TranscriptionResult result)
+    {
+        lock (_lock)
+        {
+            _allResults.Add(result);
+            _newResults.Add(result);
+            
+            if (result.IsFinal && !string.IsNullOrWhiteSpace(result.Text))
+            {
+                _finalUtterances.Add(result.Text.Trim());
+                _currentInterim = string.Empty;
+            }
+            else
+            {
+                _currentInterim = result.Text ?? string.Empty;
+            }
+        }
+    }
+    
+    public bool IsWinnerCandidate()
+    {
+        lock (_lock)
+        {
+            var confidence = GetConfidence();
+            var text = GetBestText();
+            
+            // 🚀 RELAXED CRITERIA: Winner can be selected with good interim results OR final results
+            // We need either:
+            // 1. Good final utterances with decent confidence
+            // 2. OR good interim text with high confidence (for immediate selection)
+            var hasFinalText = _finalUtterances.Any() && _finalUtterances.Sum(u => u.Length) >= WINNER_MIN_TEXT_LENGTH;
+            var hasGoodInterim = !string.IsNullOrWhiteSpace(_currentInterim) && 
+                                _currentInterim.Length >= WINNER_MIN_TEXT_LENGTH && 
+                                confidence >= WINNER_CONFIDENCE_THRESHOLD + 0.1f; // Slightly higher threshold for interim
+            
+            return confidence >= WINNER_CONFIDENCE_THRESHOLD && 
+                   text.Length >= WINNER_MIN_TEXT_LENGTH &&
+                   (hasFinalText || hasGoodInterim);
+        }
+    }
+    
+    public float GetConfidence()
+    {
+        lock (_lock)
+        {
+            if (!_allResults.Any()) return 0f;
+            return (float)_allResults.Average(r => r.Confidence);
+        }
+    }
+    
+    public string GetBestText()
+    {
+        lock (_lock)
+        {
+            var accumulated = string.Join(" ", _finalUtterances).Trim();
+            if (!string.IsNullOrWhiteSpace(_currentInterim))
+            {
+                return string.IsNullOrWhiteSpace(accumulated) ? _currentInterim : $"{accumulated} {_currentInterim}";
+            }
+            return accumulated;
+        }
+    }
+    
+    public string GetCurrentInterim()
+    {
+        lock (_lock)
+        {
+            return _currentInterim;
+        }
+    }
+    
+    public List<TranscriptionResult> GetAllResults()
+    {
+        lock (_lock)
+        {
+            return _allResults.ToList();
+        }
+    }
+    
+    public bool HasNewResults()
+    {
+        lock (_lock)
+        {
+            return _newResults.Any();
+        }
+    }
+    
+    public List<TranscriptionResult> GetAndClearNewResults()
+    {
+        lock (_lock)
+        {
+            var results = _newResults.ToList();
+            _newResults.Clear();
+            return results;
+        }
+    }
+}
+
+public class ConversationState : IDisposable
+{
+    public string ConnectionId { get; }
+    public Channel<byte[]> AudioStreamChannel { get; private set; } = Channel.CreateUnbounded<byte[]>();
+    public ConversationPhase CycleState { get; set; } = ConversationPhase.Ready;
+    public string? SessionId { get; private set; }
+    public string? PrimaryLanguage { get; private set; }
+    public string? SecondaryLanguage { get; private set; }
+    public string? LastSpeakerId { get; set; }
+    
+    // ⚡ SINGLE LANGUAGE: Processing language for this session
+    public string ProcessingLanguage { get; private set; } = "en-US";
+    
+    // ⚡ IMMEDIATE CANCELLATION: Store cancellation token for instant STT stopping
+    public CancellationTokenSource? CurrentCycleCts { get; set; }
+    
+    // ⚡ DOUBLE-PROCESSING PREVENTION: Track if utterance is already being processed
+    public bool IsProcessingStarted { get; set; } = false;
+    
+    // 🎯 UTTERANCE MANAGEMENT: Dedicated manager for utterance collection and processing
+    private readonly UtteranceManager _utteranceManager;
+    public UtteranceManager UtteranceManager => _utteranceManager;
+    public string? ProvisionalSpeakerId { get; set; }
+    public float SpeakerMatchConfidence { get; set; } = 0f;
+    public AudioFingerprint? AccumulatedAudioFingerprint { get; set; }
+    
+    // STRICT DESIGN: Only accept audio when Ready (new cycle) or actively receiving (before VAD timeout)
+    // Once VAD triggers ProcessingUtterance/SendingResponse, reject ALL new chunks until cycle completes
+    public bool CanAcceptAudio => CycleState == ConversationPhase.Ready || CycleState == ConversationPhase.ReceivingAudio;
+    
+    public bool ShouldStartNewCycle => CycleState == ConversationPhase.Ready;
+    
+    /// <summary>
+    /// 🎯 CRITICAL PROPERTY: Returns true when we have accumulated text for processing
+    /// This drives the entire processing pipeline - must be true for utterance processing to begin
+    /// </summary>
+    public bool HasAccumulatedText => _utteranceManager.HasAccumulatedText;
+    
+    /// <summary>
+    /// Expose IsUtteranceCompleted from UtteranceManager
+    /// </summary>
+    public bool IsUtteranceCompleted => _utteranceManager.IsUtteranceCompleted;
+    
+    public ConversationState(string connectionId) 
+    {
+        ConnectionId = connectionId;
+        _utteranceManager = new UtteranceManager(connectionId);
+    }
+
+    public void CacheSessionConfig(string sessionId, string primary, string secondary)
+    {
+        SessionId = sessionId;
+        PrimaryLanguage = primary;
+        SecondaryLanguage = secondary;
+        
+        // Set processing language to primary language
+        ProcessingLanguage = primary;
+    }
+
+    /// <summary>
+    /// Add transcription result from STT service - delegate to UtteranceManager
+    /// </summary>
+    public void AddTranscriptionResult(TranscriptionResult result)
+    {
+        _utteranceManager.AddTranscriptionResult(result);
+    }
+
+    /// <summary>
+    /// Signal utterance completion from frontend VAD - delegate to UtteranceManager
+    /// </summary>
+    public void CompleteUtterance()
+    {
+        _utteranceManager.CompleteUtterance();
+    }
+
+    /// <summary>
+    /// Get current display text for real-time UI updates - delegate to UtteranceManager
+    /// </summary>
+    public string GetCurrentDisplayText()
+    {
+        return _utteranceManager.GetCurrentDisplayText();
+    }
 
     /// <summary>
     /// Get complete utterance with resolved languages and speaker context
@@ -1091,29 +1648,28 @@ public class ConversationState : IDisposable
     {
         Console.WriteLine($"TIMESTAMP_GET_COMPLETE_UTTERANCE_START: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - GetCompleteUtterance() started");
         
-        if (!IsUtteranceCompleted || !FinalUtterances.Any())
+        if (!IsUtteranceCompleted || !_utteranceManager.FinalUtterances.Any())
         {
-            Console.WriteLine($"TIMESTAMP_GET_COMPLETE_UTTERANCE_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Utterance not ready: Completed={IsUtteranceCompleted}, HasFinal={FinalUtterances.Any()}");
+            Console.WriteLine($"TIMESTAMP_GET_COMPLETE_UTTERANCE_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Utterance not ready: Completed={IsUtteranceCompleted}, HasFinal={_utteranceManager.FinalUtterances.Any()}");
             throw new InvalidOperationException("Utterance not completed or no content available");
         }
 
         Console.WriteLine($"TIMESTAMP_LANGUAGE_RESOLUTION_START: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Starting language resolution");
         
-        var dominantLanguage = ResolveDominantLanguage();
-        var (sourceLanguage, targetLanguage) = ResolveSourceTargetLanguages(
-            dominantLanguage, CandidateLanguages, PrimaryLanguage!);
-        var averageConfidence = CalculateAverageConfidence();
+        var dominantLanguage = ProcessingLanguage; // Use the processing language directly
+        var (sourceLanguage, targetLanguage) = ResolveSourceTargetLanguages(dominantLanguage);
+        var averageConfidence = _utteranceManager.CalculateAverageConfidence();
 
         var result = new UtteranceWithContext
         {
-            Text = GetAccumulatedText(),
+            Text = _utteranceManager.GetAccumulatedText(),
             SourceLanguage = sourceLanguage,
             TargetLanguage = targetLanguage,
             DominantLanguage = dominantLanguage,
             TranscriptionConfidence = averageConfidence,
             ProvisionalSpeakerId = ProvisionalSpeakerId,
             SpeakerConfidence = SpeakerMatchConfidence,
-            DetectionResults = AllResults.ToList(),
+            DetectionResults = _utteranceManager.AllResults.ToList(),
             AudioFingerprint = AccumulatedAudioFingerprint,
             CreatedAt = DateTime.UtcNow
         };
@@ -1133,19 +1689,18 @@ public class ConversationState : IDisposable
     }
 
     /// <summary>
-    /// Reset utterance state for new conversation cycle
+    /// Adopt winner's results from language-specific utterance manager
+    /// 🎯 CRITICAL: This method must properly transfer ALL winner's data including interim text
     /// </summary>
+    public void AdoptWinnerResults(LanguageSpecificUtteranceManager winner)
+    {
+        _utteranceManager.AdoptWinnerResults(winner);
+        // Update processing language to winner's language
+        ProcessingLanguage = winner.LanguageCode;
+    }
     public void ResetUtteranceState()
     {
-        FinalUtterances.Clear();
-        CurrentInterimText = string.Empty;
-        LanguageVotes.Clear();
-        AllResults.Clear();
-        ConfidenceScores.Clear();
-        ProvisionalSpeakerId = null;
-        SpeakerMatchConfidence = 0f;
-        AccumulatedAudioFingerprint = null;
-        IsUtteranceCompleted = false;
+        _utteranceManager.ResetUtteranceState();
     }
 
     public void StartReceivingAudio() => CycleState = ConversationPhase.ReceivingAudio;
@@ -1172,82 +1727,24 @@ public class ConversationState : IDisposable
         ResetUtteranceState();
     }
     
+    /// <summary>
+    /// Reset the audio channel for a new conversation cycle
+    /// </summary>
+    public void ResetAudioChannel()
+    {
+        // Close old channel if it was somehow still open
+        AudioStreamChannel.Writer.TryComplete();
+        // Create a fresh one
+        AudioStreamChannel = Channel.CreateUnbounded<byte[]>();
+        Console.WriteLine($"TIMESTAMP_AUDIO_CHANNEL_RESET: {DateTime.UtcNow:HH:mm:ss.fff} - {ConnectionId} - Audio channel re-initialized for new cycle");
+    }
+
     public void Dispose() => AudioStreamChannel.Writer.TryComplete();
 
-    // --- Private Helper Methods ---
-
-    private string GetAccumulatedText()
+    private (string sourceLanguage, string targetLanguage) ResolveSourceTargetLanguages(string sourceLanguage)
     {
-        return string.Join(" ", FinalUtterances).Trim();
-    }
-
-    private void ProcessFinalResult(TranscriptionResult result)
-    {
-        if (!string.IsNullOrWhiteSpace(result.Text))
-        {
-            FinalUtterances.Add(result.Text.Trim());
-            TrackLanguageVote(result.Language);
-        }
-        CurrentInterimText = string.Empty;
-    }
-
-    private void UpdateInterimResult(TranscriptionResult result)
-    {
-        CurrentInterimText = result.Text ?? string.Empty;
-        TrackLanguageVote(result.Language);
-    }
-
-    private void TrackLanguageVote(string language)
-    {
-        if (string.IsNullOrWhiteSpace(language)) return;
-        LanguageVotes[language] = LanguageVotes.GetValueOrDefault(language, 0) + 1;
-    }
-
-    private string ResolveDominantLanguage()
-    {
-        if (LanguageVotes.Count == 0)
-            return AllResults.FirstOrDefault()?.Language ?? "en-US";
-
-        return LanguageVotes
-            .OrderByDescending(kvp => kvp.Value)
-            .First()
-            .Key;
-    }
-
-    private (string sourceLanguage, string targetLanguage) ResolveSourceTargetLanguages(
-        string dominantLanguage, 
-        string[] candidateLanguages, 
-        string sessionPrimaryLanguage)
-    {
-        // Rule 1: Dominant language is in candidates
-        if (candidateLanguages.Contains(dominantLanguage))
-        {
-            var otherCandidates = candidateLanguages.Where(c => c != dominantLanguage).ToArray();
-            var targetLanguage = otherCandidates.FirstOrDefault() ?? sessionPrimaryLanguage;
-            return (dominantLanguage, targetLanguage);
-        }
-
-        // Rule 2: Check if secondary detected language is in candidates
-        var secondaryLanguage = LanguageVotes
-            .Where(kvp => kvp.Key != dominantLanguage)
-            .OrderByDescending(kvp => kvp.Value)
-            .FirstOrDefault()
-            .Key;
-
-        if (!string.IsNullOrEmpty(secondaryLanguage) && candidateLanguages.Contains(secondaryLanguage))
-        {
-            var otherCandidates = candidateLanguages.Where(c => c != secondaryLanguage).ToArray();
-            var targetLanguage = otherCandidates.FirstOrDefault() ?? sessionPrimaryLanguage;
-            return (secondaryLanguage, targetLanguage);
-        }
-
-        // Rule 3: Fallback - use detected as source, session primary as target
-        return (dominantLanguage, sessionPrimaryLanguage);
-    }
-
-    private float CalculateAverageConfidence()
-    {
-        if (ConfidenceScores.Count == 0) return 0f;
-        return ConfidenceScores.Average();
+        // Simple rule: if source is primary, target is secondary, and vice versa
+        var targetLanguage = sourceLanguage == PrimaryLanguage ? SecondaryLanguage : PrimaryLanguage;
+        return (sourceLanguage, targetLanguage ?? "en-US");
     }
 }

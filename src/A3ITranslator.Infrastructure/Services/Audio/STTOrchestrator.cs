@@ -2,11 +2,13 @@ using System.Threading.Channels;
 using A3ITranslator.Application.Services;
 using A3ITranslator.Application.Models;
 using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore.Storage;
-
 
 namespace A3ITranslator.Infrastructure.Services.Audio;
 
+/// <summary>
+/// STT Orchestrator with single language processing
+/// Simplified architecture using single language instead of multi-candidate detection
+/// </summary>
 public class STTOrchestrator : IStreamingSTTService
 {
     private readonly ILogger<STTOrchestrator> _logger;
@@ -22,66 +24,100 @@ public class STTOrchestrator : IStreamingSTTService
         _googleSTT = googleSTT;
         _azureSTT = azureSTT;
 
-        System.Console.WriteLine("🦄 STT Orchestrator CONSTRUCTOR - Instance Created");
-        _logger.LogInformation("🔧 STT Orchestrator initialized with direct singleton injection");
+        _logger.LogInformation("🔧 STT Orchestrator initialized with single language processing");
     }
 
     /// <summary>
-    /// Process audio stream with automatic language detection using candidate languages
+    /// Process audio stream with the specified language for transcription
     /// </summary>
-    public async IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+    public async IAsyncEnumerable<TranscriptionResult> ProcessStreamAsync(
         ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
+        string language,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {      
+    {
         var googleSucceeded = false;
-        var fallbackMessage = "[Google Auto-Detection Error Fallback] Processing failed";
 
-        // Priority 1: Google Auto-Detection with candidate languages (handles WebM/Opus chunks with language detection)
-        IAsyncEnumerable<TranscriptionResult>? googleResults = null;
+        // 🎯 GOOGLE STT PHASE (Real-time consumption)
+        IAsyncEnumerator<TranscriptionResult>? googleEnumerator = null;
         try
         {
-            _logger.LogDebug("🔍 STT Orchestrator: Attempting Google Auto-Detection");
-            // Use proper auto language detection method with candidate languages
-            googleResults = _googleSTT.ProcessAutoLanguageDetectionAsync(audioStream, candidateLanguages, cancellationToken);
-            Console.WriteLine($"🔍 TIMESTAMP_STT_Orchestrator: {DateTime.Now}");
+            _logger.LogDebug("🔍 STT Orchestrator: Processing with Google STT for language: {Language}", language);
+            googleEnumerator = _googleSTT.ProcessStreamAsync(audioStream, language, cancellationToken).GetAsyncEnumerator(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ STT Orchestrator: Google Auto-Detection initialization failed");
+            _logger.LogError(ex, "❌ STT Orchestrator: Google STT initialization failed for {Language}", language);
         }
 
-        if (googleResults != null)
+        if (googleEnumerator != null)
         {
-            await foreach (var result in googleResults)
+            while (true)
             {
-                Console.WriteLine($"TIMESTAMP_STT_ORCHESTRATOR_RESULT: {DateTime.UtcNow:HH:mm:ss.fff} - Text: '{result.Text}' - IsFinal: {result.IsFinal}");
-                
-                if (result.IsFinal)
+                TranscriptionResult? result = null;
+                try
                 {
-                    googleSucceeded = true;
+                    if (!await googleEnumerator.MoveNextAsync()) break;
+                    result = googleEnumerator.Current;
+                    if (result.IsFinal) googleSucceeded = true;
                 }
-                
-                // Yield immediately instead of buffering
-                yield return result;
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ STT Orchestrator: Google STT stream error for {Language}", language);
+                    break;
+                }
+
+                if (result != null) yield return result;
             }
+            await googleEnumerator.DisposeAsync();
         }
 
-        // Only provide fallback if Google completely failed and we haven't yielded any results
+        // 🎯 AZURE FALLBACK PHASE (If Google didn't produce a final result)
         if (!googleSucceeded)
         {
-            // If Google Auto-Detection failed, provide fallback result to avoid blocking the pipeline
-            _logger.LogWarning("⚠️ STT Orchestrator: Google Auto-Detection failed, sending fallback message");
+            _logger.LogWarning("🔄 STT Orchestrator: Falling back to Azure STT for language: {Language}", language);
+            IAsyncEnumerator<TranscriptionResult>? azureEnumerator = null;
             
-            var primaryLanguage = candidateLanguages.FirstOrDefault() ?? "en-US";
-            yield return new TranscriptionResult
+            try
             {
-                Text = fallbackMessage,
-                Language = primaryLanguage,
-                Confidence = 0.1f,
-                IsFinal = true,
-                Timestamp = TimeSpan.Zero // Use TimeSpan.Zero instead of DateTime
-            };
+                azureEnumerator = _azureSTT.ProcessStreamAsync(audioStream, language, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ STT Orchestrator: Azure STT fallback initialization failed for {Language}", language);
+            }
+
+            if (azureEnumerator != null)
+            {
+                while (true)
+                {
+                    TranscriptionResult? result = null;
+                    try
+                    {
+                        if (!await azureEnumerator.MoveNextAsync()) break;
+                        result = azureEnumerator.Current;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "❌ STT Orchestrator: Azure STT fallback stream error for {Language}", language);
+                        break;
+                    }
+
+                    if (result != null) yield return result;
+                }
+                await azureEnumerator.DisposeAsync();
+            }
+            else
+            {
+                // Last resort error result
+                yield return new TranscriptionResult
+                {
+                    Text = $"[STT Processing Failed for {language}]",
+                    Language = language,
+                    IsFinal = true,
+                    Confidence = 0.0,
+                    Timestamp = TimeSpan.Zero
+                };
+            }
         }
     }
 }

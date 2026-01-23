@@ -6,10 +6,10 @@ namespace A3ITranslator.Application.Services;
 public interface IStreamingSTTService
 {
     /// <summary>
-    /// Process audio stream with automatic language detection using candidate languages
+    /// Process audio stream with the specified language for transcription
     /// </summary>
-    IAsyncEnumerable<TranscriptionResult> ProcessAutoLanguageDetectionAsync(
+    IAsyncEnumerable<TranscriptionResult> ProcessStreamAsync(
         ChannelReader<byte[]> audioStream,
-        string[] candidateLanguages,
+        string language,
         CancellationToken cancellationToken = default);
 }
