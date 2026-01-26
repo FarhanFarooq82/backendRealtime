@@ -58,7 +58,7 @@ public class AzureGenAIService : IGenAIService
         }
     }
 
-    public async Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt)
+    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt)
     {
         try
         {
@@ -95,12 +95,25 @@ public class AzureGenAIService : IGenAIService
             if (response?.Value?.Choices?.Any() == true)
             {
                 var content = response.Value.Choices[0].Message.Content;
-                _logger.LogDebug("Azure OpenAI response received, length: {Length}", content?.Length ?? 0);
-                return content ?? string.Empty;
+                var usage = response.Value.Usage;
+
+                _logger.LogDebug("Azure OpenAI response received, length: {Length}, Usage: In={PromptTokens}, Out={CompletionTokens}", 
+                    content?.Length ?? 0, usage?.PromptTokens ?? 0, usage?.CompletionTokens ?? 0);
+
+                return new GenAIResponse
+                {
+                    Content = content ?? string.Empty,
+                    Model = _options.Azure.OpenAIDeploymentName,
+                    Usage = new GenAIUsage
+                    {
+                        InputTokens = usage?.PromptTokens ?? 0,
+                        OutputTokens = usage?.CompletionTokens ?? 0
+                    }
+                };
             }
 
             _logger.LogWarning("Azure OpenAI returned empty response");
-            return string.Empty;
+            return new GenAIResponse { Model = _options.Azure.OpenAIDeploymentName };
         }
         catch (Exception ex)
         {

@@ -9,15 +9,18 @@ namespace A3ITranslator.API.Controllers;
 public class TranslationController : ControllerBase
 {
     private readonly IGenAIService _genAIService;
+    private readonly IMetricsService _metricsService;
     private readonly ILogger<TranslationController> _logger;
     private readonly IMediator _mediator;
 
     public TranslationController(
         IGenAIService genAIService,
+        IMetricsService metricsService,
         ILogger<TranslationController> logger,
         IMediator mediator)
     {
         _genAIService = genAIService;
+        _metricsService = metricsService;
         _logger = logger;
         _mediator = mediator;
     }
@@ -46,10 +49,28 @@ Provide only the translation, no explanations or additional text.
 Original text: {request.Text}";
 
             // Generate translation using GenAI service
-            string translatedText = await _genAIService.GenerateResponseAsync(
+            var genAIResponse = await _genAIService.GenerateResponseAsync(
                 systemPrompt, 
                 $"Translate: {request.Text}"
             );
+            string translatedText = genAIResponse.Content;
+
+            // Log Metrics
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "DirectTranslation",
+                Model = genAIResponse.Model,
+                InputUnits = genAIResponse.Usage.InputTokens,
+                InputUnitType = "Tokens",
+                OutputUnits = genAIResponse.Usage.OutputTokens,
+                OutputUnitType = "Tokens",
+                SystemPrompt = systemPrompt,
+                UserPrompt = request.Text,
+                Response = translatedText,
+                CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010)
+            });
 
             return Ok(new
             {

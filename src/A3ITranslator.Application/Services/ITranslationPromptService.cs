@@ -8,4 +8,9 @@ namespace A3ITranslator.Application.Services;
 public interface ITranslationPromptService
 {
     Task<(string systemPrompt, string userPrompt)> BuildTranslationPromptsAsync(EnhancedTranslationRequest request);
+
+    /// <summary>
+    /// Build prompts for generating a concise conversation summary
+    /// </summary>
+    Task<(string systemPrompt, string userPrompt)> BuildSummaryPromptsAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage);
 }

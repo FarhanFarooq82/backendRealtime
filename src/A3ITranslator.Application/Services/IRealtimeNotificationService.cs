@@ -69,6 +69,16 @@ public interface IRealtimeNotificationService
     /// Send TTS audio chunk for frontend playback
     /// </summary>
     Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk);
+
+    /// <summary>
+    /// Send AI generated conversation summary for user review
+    /// </summary>
+    Task SendSessionSummaryAsync(string connectionId, string summaryText);
+
+    /// <summary>
+    /// Notify finalization success - signals all emails sent and session can be closed
+    /// </summary>
+    Task SendFinalizationSuccessAsync(string connectionId);
 }
 
 // Supporting enums and types for the interface

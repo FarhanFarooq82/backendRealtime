@@ -7,6 +7,7 @@ using A3ITranslator.Infrastructure.Services.Orchestration;
 using A3ITranslator.Infrastructure.Services.Audio;
 using A3ITranslator.Infrastructure.Services.Azure;
 using A3ITranslator.Infrastructure.Services.Translation;
+using A3ITranslator.Infrastructure.Services.Metrics;
 using A3ITranslator.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,6 +51,9 @@ public static class InfrastructureServiceRegistration
 
         // ✅ Data Routing Service
         services.AddSingleton<DataRouterService>();
+
+        // ✅ Metrics and Cost Logging
+        services.AddSingleton<IMetricsService, CsvMetricsLogger>();
 
         // Note: IRealtimeNotificationService (SignalRNotificationService) is registered in Program.cs
         // as it's in the API layer and should not be referenced from Infrastructure

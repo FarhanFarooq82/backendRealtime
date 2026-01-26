@@ -92,4 +92,10 @@ public class SignalRNotificationService : IRealtimeNotificationService
 
     public Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk) =>
         _hubContext.Clients.Client(connectionId).ReceiveFrontendTTSChunk(ttsChunk);
+
+    public Task SendSessionSummaryAsync(string connectionId, string summaryText) =>
+        _hubContext.Clients.Client(connectionId).ReceiveSessionSummary(summaryText);
+
+    public Task SendFinalizationSuccessAsync(string connectionId) =>
+        _hubContext.Clients.Client(connectionId).ReceiveFinalizationSuccess();
 }

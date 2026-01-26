@@ -74,9 +74,22 @@ public interface ITTSService
     Task<bool> CheckHealthAsync();
 }
 
-/// <summary>
-/// GenAI service interface for prompt/response with AI models
-/// Supports Azure Copilot, Gemini, OpenAI GPT, etc.
+
+
+public class GenAIUsage
+{
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    public int TotalTokens => InputTokens + OutputTokens;
+}
+
+public class GenAIResponse
+{
+    public string Content { get; set; } = string.Empty;
+    public GenAIUsage Usage { get; set; } = new();
+    public string Model { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// GenAI service interface for system/user prompt processing
 /// Supports both traditional and streaming responses
@@ -91,7 +104,7 @@ public interface IGenAIService
     /// <summary>
     /// Generate response from system and user prompts
     /// </summary>
-    Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt);
+    Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt);
     
     /// <summary>
     /// Stream response tokens from system and user prompts

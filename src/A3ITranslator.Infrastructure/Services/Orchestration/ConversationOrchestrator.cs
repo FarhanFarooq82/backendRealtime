@@ -12,6 +12,8 @@ using A3ITranslator.Application.Enums;
 using A3ITranslator.Infrastructure.Services.Azure;
 using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
+using System.Text;
+using System.Linq;
 using A3ITranslator.Application.Models;
 using A3ITranslator.Infrastructure.Services.Translation; // ✅ For ConversationHistoryItem
 
@@ -39,6 +41,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly ITranslationOrchestrator _translationOrchestrator;
     private readonly IFrontendConversationItemService _frontendService;
     private readonly IAudioFeatureExtractor _featureExtractor;
+    private readonly IMetricsService _metricsService;
 
     // Per-connection conversation state
     private readonly Dictionary<string, ConversationState> _connectionStates = new();
@@ -54,7 +57,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ISpeakerManagementService speakerManager,
         ITranslationOrchestrator translationOrchestrator,
         IFrontendConversationItemService frontendService,
-        IAudioFeatureExtractor featureExtractor)
+        IAudioFeatureExtractor featureExtractor,
+        IMetricsService metricsService)
     {
         _logger = logger;
         _notificationService = notificationService;
@@ -66,6 +70,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _translationOrchestrator = translationOrchestrator;
         _frontendService = frontendService;
         _featureExtractor = featureExtractor;
+        _metricsService = metricsService;
     }
 
     /// <summary>
@@ -144,6 +149,33 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _logger.LogDebug("✅ Utterance completion marked for {ConnectionId}. Pipeline will drain lingering chunks.", connectionId);
         
         // Processing will happen in ProcessConversationPipelineAsync after grace period
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Cancel the current conversation cycle and reset for next input
+    /// </summary>
+    public async Task CancelUtteranceAsync(string connectionId)
+    {
+        var state = GetOrCreateConversationState(connectionId);
+        
+        _logger.LogInformation("🛑 Frontend CANCEL: CancelUtterance signal received for {ConnectionId}", connectionId);
+        Console.WriteLine($"TIMESTAMP_CANCEL_UTTERANCE_SIGNAL: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Frontend requested cancellation");
+
+        // 1. Immediately cancel any active processing in this cycle
+        state.CancelCurrentCycle();
+        
+        // 2. Clear buffers and reset state for immediate next use
+        state.ResetCycle();
+        
+        // 3. Complete the audio channel to stop any pending reads
+        state.AudioStreamChannel.Writer.TryComplete();
+        
+        // 4. Notify frontend that we are ready again
+        await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
+        
+        _logger.LogDebug("✅ Conversation cycle cancelled and reset for {ConnectionId}", connectionId);
+        
         await Task.CompletedTask;
     }
 
@@ -319,6 +351,24 @@ public class ConversationOrchestrator : IConversationOrchestrator
         
         Console.WriteLine($"TIMESTAMP_PROCESS_START: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Starting ProcessCompletedUtteranceAsync via {trigger}");
         
+        // Log STT Metrics
+        var audioSec = state.UtteranceManager.GetTotalDurationSeconds();
+        _ = _metricsService.LogMetricsAsync(new UsageMetrics
+        {
+            SessionId = state.SessionId ?? "unknown",
+            ConnectionId = connectionId,
+            Category = ServiceCategory.STT,
+            Provider = "Azure", // Fixed as we use Azure currently
+            Operation = "StreamingTranscription",
+            InputUnits = (long)audioSec,
+            InputUnitType = "Seconds",
+            AudioLengthSec = audioSec,
+            UserPrompt = "AUDIO_STREAM",
+            Response = state.UtteranceManager.GetAccumulatedText(),
+            CostUSD = audioSec * 0.000266, // $0.016/min
+            Status = "Success"
+        });
+
         // Pass the accumulated fingerprint to the processing logic
         state.SetSpeakerContext(null, 0, rollingFingerprint);
         
@@ -1086,6 +1136,22 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 }
                 
                 Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_NEURAL_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous Neural TTS completed, total chunks: {chunkCount}");
+
+                // Log TTS Metrics (Neural)
+                _ = _metricsService.LogMetricsAsync(new UsageMetrics
+                {
+                    SessionId = state?.SessionId ?? "unknown",
+                    ConnectionId = connectionId,
+                    Category = ServiceCategory.TTS,
+                    Provider = "Azure",
+                    Operation = "NeuralTTS",
+                    OutputUnits = text.Length,
+                    OutputUnitType = "Characters",
+                    UserPrompt = text,
+                    Response = "AUDIO_STREAM",
+                    CostUSD = text.Length * 0.000016, // $16/1M characters
+                    Status = "Success"
+                });
             }
             else
             {
@@ -1097,6 +1163,23 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
                 
                 Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_STANDARD_COMPLETE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous Standard TTS completed");
+
+                // Log TTS Metrics (Standard)
+                _ = _metricsService.LogMetricsAsync(new UsageMetrics
+                {
+                    SessionId = state?.SessionId ?? "unknown",
+                    ConnectionId = connectionId,
+                    Category = ServiceCategory.TTS,
+                    Provider = "Azure",
+                    Operation = "StandardTTS",
+                    OutputUnits = text.Length,
+                    OutputUnitType = "Characters",
+                    SystemPrompt = null, // TTS does not use a system prompt
+                    UserPrompt = text,
+                    Response = "AUDIO_STREAM",
+                    CostUSD = text.Length * 0.000004, // $4/1M characters
+                    Status = "Success"
+                });
             }
 
             Console.WriteLine($"TIMESTAMP_TTS_CONTINUOUS_END: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - Continuous TTS processing completed");
@@ -1140,6 +1223,92 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         if (session != null)
             await _speakerManager.ClearSessionAsync(session.SessionId);
+    }
+
+    public async Task RequestSummaryAsync(string connectionId)
+    {
+        try
+        {
+            _logger.LogInformation("🚀 ORCHESTRATOR: Generating session summary for {ConnectionId}", connectionId);
+            
+            var session = await _sessionRepository.GetByConnectionIdAsync(connectionId, CancellationToken.None);
+            if (session == null)
+            {
+                _logger.LogWarning("⚠️ ORCHESTRATOR: Session not found for {ConnectionId}, cannot generate summary", connectionId);
+                await _notificationService.NotifyErrorAsync(connectionId, "Session not found.");
+                return;
+            }
+
+            // Build history string from conversation turns
+            var historyBuilder = new StringBuilder();
+            foreach (var turn in session.ConversationHistory.OrderBy(t => t.Timestamp))
+            {
+                historyBuilder.AppendLine($"[{turn.Timestamp:HH:mm:ss}] {turn.SpeakerName}: {turn.OriginalText}");
+                if (!string.IsNullOrEmpty(turn.TranslatedText))
+                {
+                    historyBuilder.AppendLine($"   (Translation: {turn.TranslatedText})");
+                }
+            }
+            
+            var history = historyBuilder.ToString();
+            
+            if (string.IsNullOrWhiteSpace(history))
+            {
+                await _notificationService.SendSessionSummaryAsync(connectionId, "No conversation history available to summarize.");
+                return;
+            }
+
+            var summary = await _translationOrchestrator.GenerateConversationSummaryAsync(
+                history, 
+                session.PrimaryLanguage, 
+                session.SecondaryLanguage ?? "en-US");
+
+            await _notificationService.SendSessionSummaryAsync(connectionId, summary);
+            _logger.LogInformation("✅ ORCHESTRATOR: Summary sent for {ConnectionId}", connectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ ORCHESTRATOR: Failed to handle summary request for {ConnectionId}", connectionId);
+            await _notificationService.NotifyErrorAsync(connectionId, $"Summary generation failed: {ex.Message}");
+        }
+    }
+
+    public async Task FinalizeAndMailAsync(string connectionId, List<string> emailAddresses)
+    {
+        try
+        {
+            _logger.LogInformation("🚀 ORCHESTRATOR: Finalizing session and mailing for {ConnectionId} to {Count} addresses", 
+                connectionId, emailAddresses.Count);
+            
+            var session = await _sessionRepository.GetByConnectionIdAsync(connectionId, CancellationToken.None);
+            if (session == null)
+            {
+                _logger.LogWarning("⚠️ ORCHESTRATOR: Session not found for {ConnectionId}, cannot finalize", connectionId);
+                await _notificationService.NotifyErrorAsync(connectionId, "Session not found.");
+                return;
+            }
+
+            // 1. Generate PDF (Mock)
+            // In a real implementation, we would use a library like QuestPDF or iText
+            _logger.LogInformation("📄 MOCK: Generating PDF for connection {ConnectionId} with {TurnCount} turns", 
+                connectionId, session.ConversationHistory.Count);
+            
+            // 2. Send Emails (Mock)
+            foreach (var email in emailAddresses)
+            {
+                _logger.LogInformation("📧 MOCK: Sending transcript PDF to {Email}", email);
+            }
+            
+            // 3. Notify success
+            await _notificationService.SendFinalizationSuccessAsync(connectionId);
+            
+            _logger.LogInformation("✅ ORCHESTRATOR: Finalization successful for {ConnectionId}", connectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ ORCHESTRATOR: Failed to finalize session for {ConnectionId}", connectionId);
+            await _notificationService.NotifyErrorAsync(connectionId, $"Finalization failed: {ex.Message}");
+        }
     }
 
     private async Task SaveConversationItemAsync(string sessionId, UtteranceWithContext utterance, dynamic genAIResponse) => await Task.CompletedTask;
@@ -1426,6 +1595,14 @@ public class UtteranceManager
     }
     
     /// <summary>
+    /// Calculate total duration of all final utterances
+    /// </summary>
+    public double GetTotalDurationSeconds()
+    {
+        return AllResults.Where(r => r.IsFinal).Sum(r => r.Duration.TotalSeconds);
+    }
+    
+    /// <summary>
     /// Update interim transcription result
     /// </summary>
     public void UpdateInterimResult(TranscriptionResult result)
@@ -1528,6 +1705,14 @@ public class LanguageSpecificUtteranceManager
         lock (_lock)
         {
             return _currentInterim;
+        }
+    }
+
+    public double GetTotalDurationSeconds()
+    {
+        lock (_lock)
+        {
+            return _allResults.Where(r => r.IsFinal).Sum(r => r.Duration.TotalSeconds);
         }
     }
     

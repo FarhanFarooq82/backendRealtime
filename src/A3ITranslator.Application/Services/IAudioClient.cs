@@ -95,4 +95,14 @@ public interface IHubClient
     /// Receive TTS audio chunk for frontend playback
     /// </summary>
     Task ReceiveFrontendTTSChunk(FrontendTTSChunk ttsChunk);
+
+    /// <summary>
+    /// Receive AI generated conversation summary for user review
+    /// </summary>
+    Task ReceiveSessionSummary(string summaryText);
+
+    /// <summary>
+    /// Receive finalization success confirmation - signals all emails sent and session can be closed
+    /// </summary>
+    Task ReceiveFinalizationSuccess();
 }

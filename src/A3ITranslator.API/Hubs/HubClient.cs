@@ -208,4 +208,68 @@ public class HubClient : Hub<IHubClient>, IDisposable
             await Clients.Caller.ReceiveError("Utterance completion failed");
         }
     }
+
+    /// <summary>
+    /// Signal utterance cancellation from frontend
+    /// </summary>
+    public async Task CancelUtterance()
+    {
+        try
+        {
+            _logger.LogInformation("🛑 Frontend CANCEL signal for {ConnectionId}", Context.ConnectionId);
+
+            if (_hubCancellationTokenSource.Token.IsCancellationRequested)
+                return;
+
+            // ✅ CLEAN ARCHITECTURE: Delegate cancellation to orchestrator
+            await _conversationOrchestrator.CancelUtteranceAsync(Context.ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Utterance cancellation error for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError("Utterance cancellation failed");
+        }
+    }
+
+    /// <summary>
+    /// Request an AI summary of the current session
+    /// </summary>
+    public async Task RequestSummary()
+    {
+        try
+        {
+            _logger.LogInformation("📝 Requesting summary for {ConnectionId}", Context.ConnectionId);
+            await _conversationOrchestrator.RequestSummaryAsync(Context.ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ RequestSummary error for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError("Summary request failed");
+        }
+    }
+
+    /// <summary>
+    /// Finalize session and mail PDF to provided addresses
+    /// </summary>
+    public async Task FinalizeAndMail(List<string> emailAddresses)
+    {
+        try
+        {
+            _logger.LogInformation("📧 Finalizing and mailing for {ConnectionId} to {Count} addresses", 
+                Context.ConnectionId, emailAddresses?.Count ?? 0);
+            
+            if (emailAddresses == null || !emailAddresses.Any())
+            {
+                await Clients.Caller.ReceiveError("No email addresses provided");
+                return;
+            }
+
+            await _conversationOrchestrator.FinalizeAndMailAsync(Context.ConnectionId, emailAddresses);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ FinalizeAndMail error for {ConnectionId}", Context.ConnectionId);
+            await Clients.Caller.ReceiveError("Finalization failed");
+        }
+    }
 }

@@ -163,7 +163,8 @@ public class AzureStreamingSTTService : IStreamingSTTService
                     IsFinal = false,
                     Language = language,
                     Confidence = 0.5, // Azure doesn't provide confidence for interim
-                    Timestamp = TimeSpan.FromTicks(e.Result.OffsetInTicks)
+                    Timestamp = TimeSpan.FromTicks(e.Result.OffsetInTicks),
+                    Duration = e.Result.Duration
                 });
             }
             else
@@ -197,7 +198,8 @@ public class AzureStreamingSTTService : IStreamingSTTService
                     IsFinal = true,
                     Language = language,
                     Confidence = confidence,
-                    Timestamp = TimeSpan.FromTicks(e.Result.OffsetInTicks)
+                    Timestamp = TimeSpan.FromTicks(e.Result.OffsetInTicks),
+                    Duration = e.Result.Duration
                 };
 
                 resultChannel.Writer.TryWrite(result);

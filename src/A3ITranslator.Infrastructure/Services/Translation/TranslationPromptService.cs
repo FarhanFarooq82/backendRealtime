@@ -201,6 +201,40 @@ You will receive a user message containing:
         
         return prompt.ToString();
     }
+
+    public Task<(string systemPrompt, string userPrompt)> BuildSummaryPromptsAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage)
+    {
+        var systemPrompt = $@"You are an expert meeting summarizer for a real-time translation assistant.
+Your goal is to provide a concise, professional summary (Insights) of the conversation provided.
+
+**SUMMARY FORMAT (Markdown):**
+1. **Date**: (Extract if mentioned, else use 'Current Session')
+2. **Meeting Place**: (Extract if mentioned, else 'Not specified')
+3. **Meeting Heading**: (Create a short, descriptive title)
+4. **Purpose**: (What was the primary goal of the meeting?)
+5. **Participants**: (List names or roles. If names are unknown, list as 'Speaker 1', 'Speaker 2', etc. with minimum count possible)
+6. **Key Discussion Points**: (Bullet points of what was discussed)
+7. **Conclusion & Actions**: (What was decided and what are the next steps?)
+
+**LANGUAGE REQUIREMENT:**
+- You must provide the FULL summary in BOTH {primaryLanguage} AND {secondaryLanguage}.
+- Present {primaryLanguage} summary first, then {secondaryLanguage} summary.
+- Use clear headings to separate the languages.
+
+**OUTPUT:**
+Provide only the Markdown formatted summary.";
+
+        var userPrompt = $@"Please summarize the following conversation history:
+
+### CONVERSATION HISTORY:
+{conversationHistory}
+
+### LANGUAGES:
+- Primary: {primaryLanguage}
+- Secondary: {secondaryLanguage}";
+
+        return Task.FromResult((systemPrompt, userPrompt));
+    }
 }
 
 

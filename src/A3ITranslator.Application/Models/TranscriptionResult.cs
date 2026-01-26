@@ -10,5 +10,6 @@ public class TranscriptionResult
     public bool IsFinal { get; set; }
     public double Confidence { get; set; }
     public TimeSpan Timestamp { get; set; } = TimeSpan.Zero;
+    public TimeSpan Duration { get; set; } = TimeSpan.Zero;
     public Dictionary<string, object> Metadata { get; } = new();
 }

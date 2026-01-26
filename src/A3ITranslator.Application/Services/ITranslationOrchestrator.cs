@@ -17,4 +17,9 @@ public interface ITranslationOrchestrator
     /// Returns new structured format that routes different data to different services
     /// </summary>
     Task<EnhancedTranslationResponse> ProcessEnhancedTranslationAsync(EnhancedTranslationRequest request);
+
+    /// <summary>
+    /// Generate a summary of the conversation based on history
+    /// </summary>
+    Task<string> GenerateConversationSummaryAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage);
 }

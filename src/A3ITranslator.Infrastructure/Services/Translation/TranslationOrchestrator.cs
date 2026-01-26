@@ -14,15 +14,18 @@ public class TranslationOrchestrator : ITranslationOrchestrator
 {
     private readonly ITranslationPromptService _promptService;
     private readonly IGenAIService _genAIService;
+    private readonly IMetricsService _metricsService;
     private readonly ILogger<TranslationOrchestrator> _logger;
 
     public TranslationOrchestrator(
         ITranslationPromptService promptService,
         IGenAIService genAIService,
+        IMetricsService metricsService,
         ILogger<TranslationOrchestrator> logger)
     {
         _promptService = promptService;
         _genAIService = genAIService;
+        _metricsService = metricsService;
         _logger = logger;
     }
 
@@ -41,7 +44,27 @@ public class TranslationOrchestrator : ITranslationOrchestrator
                 systemPrompt.Length, userPrompt.Length);
 
             // Get response from GenAI service
-            var rawResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            var rawResponse = genAIResponse.Content;
+
+            // Log Metrics for Legacy Translation
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                SessionId = request.SessionContext?.ContainsKey("sessionId") == true ? request.SessionContext["sessionId"].ToString() ?? "unknown" : "unknown",
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "LegacyTranslation",
+                Model = genAIResponse.Model,
+                InputUnits = genAIResponse.Usage.InputTokens,
+                InputUnitType = "Tokens",
+                OutputUnits = genAIResponse.Usage.OutputTokens,
+                OutputUnitType = "Tokens",
+                SystemPrompt = systemPrompt,
+                UserPrompt = request.Text,
+                Response = rawResponse,
+                CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010), // Example GPT-4o pricing
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+            });
 
             _logger.LogDebug("Received GenAI response: {ResponseLength} chars", rawResponse?.Length ?? 0);
 
@@ -65,6 +88,18 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process translation for: {Text}", request.Text);
+            
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                SessionId = request.SessionContext?.ContainsKey("sessionId") == true ? request.SessionContext["sessionId"].ToString() ?? "unknown" : "unknown",
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "LegacyTranslation",
+                Status = "Error",
+                ErrorMessage = ex.Message,
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+            });
+
             return CreateFallbackResponse(request, $"Translation processing failed: {ex.Message}", stopwatch.Elapsed);
         }
     }
@@ -92,8 +127,28 @@ public class TranslationOrchestrator : ITranslationOrchestrator
 
             // Get response from GenAI service
             Console.WriteLine($"TIMESTAMP_GENAI_SERVICE_CALL_START: {DateTime.UtcNow:HH:mm:ss.fff} - Calling GenAI service");
-            var rawResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            var rawResponse = genAIResponse.Content;
             Console.WriteLine($"TIMESTAMP_GENAI_SERVICE_CALL_END: {DateTime.UtcNow:HH:mm:ss.fff} - GenAI service responded: {rawResponse?.Length ?? 0} chars");
+
+            // Log Metrics for Enhanced Translation
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                SessionId = request.SessionContext?.ContainsKey("sessionId") == true ? request.SessionContext["sessionId"].ToString() ?? "unknown" : "unknown",
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "EnhancedTranslation",
+                Model = genAIResponse.Model,
+                InputUnits = genAIResponse.Usage.InputTokens,
+                InputUnitType = "Tokens",
+                OutputUnits = genAIResponse.Usage.OutputTokens,
+                OutputUnitType = "Tokens",
+                SystemPrompt = systemPrompt,
+                UserPrompt = request.Text,
+                Response = rawResponse,
+                CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010),
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+            });
 
             _logger.LogDebug("Received GenAI response: {ResponseLength} chars", rawResponse?.Length ?? 0);
 
@@ -123,6 +178,18 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         {
             Console.WriteLine($"TIMESTAMP_TRANSLATION_ERROR: {DateTime.UtcNow:HH:mm:ss.fff} - Enhanced translation failed: {ex.Message}");
             _logger.LogError(ex, "❌ Failed to process enhanced translation for: {Text}", request.Text);
+
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                SessionId = request.SessionContext?.ContainsKey("sessionId") == true ? request.SessionContext["sessionId"].ToString() ?? "unknown" : "unknown",
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "EnhancedTranslation",
+                Status = "Error",
+                ErrorMessage = ex.Message,
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+            });
+
             return CreateEnhancedFallbackResponse(request, $"Enhanced translation processing failed: {ex.Message}", stopwatch.Elapsed);
         }
     }
@@ -649,5 +716,60 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             AIAssistance = new AIAssistanceData { TriggerDetected = false },
             FactExtraction = new FactExtractionPayload { RequiresFactExtraction = false, Confidence = 0f }
         };
+    }
+
+    public async Task<string> GenerateConversationSummaryAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage)
+    {
+        try
+        {
+            _logger.LogInformation("Generating conversation summary for languages: {Primary}, {Secondary}", primaryLanguage, secondaryLanguage);
+            
+            var stopwatch = Stopwatch.StartNew();
+            var (systemPrompt, userPrompt) = await _promptService.BuildSummaryPromptsAsync(conversationHistory, primaryLanguage, secondaryLanguage);
+            
+            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            var summary = genAIResponse.Content;
+
+            // Log Metrics for Summary
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                Category = ServiceCategory.Summarization,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "ConversationSummary",
+                Model = genAIResponse.Model,
+                InputUnits = genAIResponse.Usage.InputTokens,
+                InputUnitType = "Tokens",
+                OutputUnits = genAIResponse.Usage.OutputTokens,
+                OutputUnitType = "Tokens",
+                SystemPrompt = systemPrompt,
+                UserPrompt = "CONVERSATION_HISTORY",
+                Response = summary,
+                CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010),
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+            });
+            
+            if (string.IsNullOrWhiteSpace(summary))
+            {
+                _logger.LogWarning("GenAI service returned empty summary");
+                return "Failed to generate summary. Please try again.";
+            }
+
+            return summary.Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate conversation summary");
+
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                Category = ServiceCategory.Summarization,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "ConversationSummary",
+                Status = "Error",
+                ErrorMessage = ex.Message
+            });
+
+            return $"Error generating summary: {ex.Message}";
+        }
     }
 }

@@ -114,6 +114,13 @@ public interface IConversationOrchestrator
     Task CompleteUtteranceAsync(string connectionId);
 
     /// <summary>
+    /// Cancel the current conversation cycle and reset for next input
+    /// Stops any active STT, GenAI, or TTS processing for this connection
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    Task CancelUtteranceAsync(string connectionId);
+
+    /// <summary>
     /// Initialize connection pipeline with language candidates
     /// Prepares STT, Speaker, and VAD processing for incoming audio
     /// </summary>
@@ -127,4 +134,17 @@ public interface IConversationOrchestrator
     /// </summary>
     /// <param name="connectionId">SignalR connection identifier</param>
     Task CleanupConnection(string connectionId);
+
+    /// <summary>
+    /// Request an AI summary of the current session for user review
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    Task RequestSummaryAsync(string connectionId);
+
+    /// <summary>
+    /// Finalize the session, generate PDF transcript, and mail it to provided addresses
+    /// </summary>
+    /// <param name="connectionId">SignalR connection identifier</param>
+    /// <param name="emailAddresses">List of email addresses to send the transcript to</param>
+    Task FinalizeAndMailAsync(string connectionId, List<string> emailAddresses);
 }

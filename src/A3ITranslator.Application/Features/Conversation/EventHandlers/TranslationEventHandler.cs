@@ -12,6 +12,7 @@ public class TranslationEventHandler : INotificationHandler<UtteranceCommitted>
     private readonly IFactExtractionService _factService;
     private readonly IPublisher _publisher;
     private readonly ISessionRepository _sessionRepository;
+    private readonly IMetricsService _metricsService;
     private readonly ILogger<TranslationEventHandler> _logger;
 
     public TranslationEventHandler(
@@ -19,12 +20,14 @@ public class TranslationEventHandler : INotificationHandler<UtteranceCommitted>
         IFactExtractionService factService,
         IPublisher publisher,
         ISessionRepository sessionRepository,
+        IMetricsService metricsService,
         ILogger<TranslationEventHandler> logger)
     {
         _genAIService = genAIService;
         _factService = factService;
         _publisher = publisher;
         _sessionRepository = sessionRepository;
+        _metricsService = metricsService;
         _logger = logger;
     }
 
@@ -47,7 +50,26 @@ public class TranslationEventHandler : INotificationHandler<UtteranceCommitted>
 Provide clear, concise responses based on the conversation history and facts.";
 
             // 2. Generate Response
-            string responseText = await _genAIService.GenerateResponseAsync(systemPrompt, $"Speaker said: {transcript}");
+            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, $"Speaker said: {transcript}");
+            string responseText = genAIResponse.Content;
+
+            // Log Metrics
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
+            {
+                SessionId = session.SessionId,
+                Category = ServiceCategory.Translation,
+                Provider = _genAIService.GetServiceName(),
+                Operation = "BackgroundTranslation",
+                Model = genAIResponse.Model,
+                InputUnits = genAIResponse.Usage.InputTokens,
+                InputUnitType = "Tokens",
+                OutputUnits = genAIResponse.Usage.OutputTokens,
+                OutputUnitType = "Tokens",
+                SystemPrompt = systemPrompt,
+                UserPrompt = transcript,
+                Response = responseText,
+                CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010)
+            });
             
             _logger.LogInformation("✅ AI Response Generated: {Response}", responseText);
 
