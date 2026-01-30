@@ -55,24 +55,22 @@ public class SpeakerProfile
         RecalculateLanguagePercentages();
     }
 
-    public void UpdateAcousticFeatures(float pitch, float[] mfcc)
+    public void UpdateAcousticFeatures(float[] embedding)
     {
         // 90/10 Weighted Update for Stability (Centroid Sync)
         const float HISTORY_WEIGHT = 0.9f;
         const float NEW_WEIGHT = 0.1f;
 
-        VoiceFingerprint.AveragePitch = (VoiceFingerprint.AveragePitch * HISTORY_WEIGHT) + (pitch * NEW_WEIGHT);
-        
-        if (VoiceFingerprint.MfccVector.Length == mfcc.Length)
+        if (VoiceFingerprint.Embedding.Length == embedding.Length)
         {
-             for(int i=0; i<mfcc.Length; i++)
+             for(int i=0; i<embedding.Length; i++)
              {
-                 VoiceFingerprint.MfccVector[i] = (VoiceFingerprint.MfccVector[i] * HISTORY_WEIGHT) + (mfcc[i] * NEW_WEIGHT);
+                 VoiceFingerprint.Embedding[i] = (VoiceFingerprint.Embedding[i] * HISTORY_WEIGHT) + (embedding[i] * NEW_WEIGHT);
              }
         }
-        else if (VoiceFingerprint.MfccVector.Length == 0)
+        else if (VoiceFingerprint.Embedding.Length == 0)
         {
-            VoiceFingerprint.MfccVector = mfcc;
+            VoiceFingerprint.Embedding = embedding;
         }
     }
 
@@ -103,9 +101,9 @@ public class LanguageCapability
 
 public class AudioFingerprint
 {
-    public float AveragePitch { get; set; }
-    public float[] MfccVector { get; set; } = Array.Empty<float>();
+    public float[] Embedding { get; set; } = Array.Empty<float>();
     public float MatchConfidence { get; set; } = 0f;
+    public string ModelVersion { get; set; } = "v1-onnx";
 }
 
 public class SpeakerInsights

@@ -50,4 +50,10 @@ public class ConversationTurn
         TargetLanguage = targetLanguage;
         return this;
     }
+
+    public void UpdateSpeaker(string speakerId, string speakerName)
+    {
+        SpeakerId = speakerId;
+        SpeakerName = speakerName;
+    }
 }

@@ -66,7 +66,6 @@ Original text: {request.Text}";
                 InputUnitType = "Tokens",
                 OutputUnits = genAIResponse.Usage.OutputTokens,
                 OutputUnitType = "Tokens",
-                SystemPrompt = systemPrompt,
                 UserPrompt = request.Text,
                 Response = translatedText,
                 CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010)

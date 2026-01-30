@@ -65,7 +65,6 @@ Provide clear, concise responses based on the conversation history and facts.";
                 InputUnitType = "Tokens",
                 OutputUnits = genAIResponse.Usage.OutputTokens,
                 OutputUnitType = "Tokens",
-                SystemPrompt = systemPrompt,
                 UserPrompt = transcript,
                 Response = responseText,
                 CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010)

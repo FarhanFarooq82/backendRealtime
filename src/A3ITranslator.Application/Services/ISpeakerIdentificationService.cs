@@ -15,12 +15,10 @@ public class SpeakerComparisonResult
 {
     public string SpeakerId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public float PitchSimilarity { get; set; }
-    public float TimbreSimilarity { get; set; }
-    public float CompositeScore { get; set; }
+    public float SimilarityScore { get; set; } // Cosine Similarity
     
     public override string ToString()
     {
-        return $"[Pitch: {PitchSimilarity:P0}, Timbre: {TimbreSimilarity:P0} -> Total: {CompositeScore:P0}]";
+        return $"[Speaker: {DisplayName}, Similarity: {SimilarityScore:P0}]";
     }
 }

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
-using A3ITranslator.Application.Interfaces;
+
 using MediatR;
 using A3ITranslator.Application.Features.Conversation.Commands.StartSession;
 using A3ITranslator.Application.Features.AudioProcessing.Commands.ProcessAudioChunk;

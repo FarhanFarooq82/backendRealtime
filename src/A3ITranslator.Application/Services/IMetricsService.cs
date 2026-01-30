@@ -25,7 +25,6 @@ public class UsageMetrics
     public long OutputUnits { get; set; }
     public string OutputUnitType { get; set; } = string.Empty;
     public double AudioLengthSec { get; set; }
-    public string SystemPrompt { get; set; } = string.Empty;
     public string UserPrompt { get; set; } = string.Empty;
     public string Response { get; set; } = string.Empty;
     public double CostUSD { get; set; }
@@ -34,7 +33,28 @@ public class UsageMetrics
     public string ErrorMessage { get; set; } = string.Empty;
 }
 
+public class CycleMetrics
+{
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string SessionId { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public DateTime CycleStartTime { get; set; }
+    public DateTime? VADTriggerTime { get; set; }
+    public DateTime? GenAIStartTime { get; set; }
+    public DateTime? GenAIEndTime { get; set; }
+    public DateTime? CycleEndTime { get; set; }
+    public double AudioDurationSec { get; set; }
+    public double STTCost { get; set; }
+    public double GenAICost { get; set; }
+    public double TTSCost { get; set; }
+    public double TotalCost { get; set; }
+    public long GenAILatencyMs { get; set; }
+    public string ImprovedTranscription { get; set; } = string.Empty;
+    public string Translation { get; set; } = string.Empty;
+}
+
 public interface IMetricsService
 {
     Task LogMetricsAsync(UsageMetrics metrics);
+    Task LogCycleMetricsAsync(CycleMetrics metrics);
 }

@@ -41,23 +41,25 @@ public class TranslationPromptService : ITranslationPromptService
 **OFFICIAL INPUT DATA STRUCTURE:**
 You will receive a user message containing:
 1. **Current Utterance**: The text to process.
-2. **Acoustic Scorecard**: Mathematical similarity scores (0-100%) against known speakers.
-3. **Speaker Context**: Profiles of known speakers (Style, Vocabulary).
-4. **Conversation History**: The last 5 turns for context.
-5. **Language Routing**: The active primary and secondary languages.
+2. **Acoustic Scorecard**: Neural similarity scores (Cosine Similarity: -1 to 1) against known speakers.
+3. **Provisional ID**: The identity suggested by the live neural monitor (if a match was found early).
+4. **Speaker Roster**: Detailed profiles of known speakers (ID, Name, Role, Style, Language).
+5. **Conversation History**: The last 5 turns for context.
+6. **Facts**: Derived facts from previous conversations.
+7. **Expected Audio Language**: The language might be in the audio
 
 **YOUR CORE RESPONSIBILITIES (Execute in Order):**
 
-1. 🕵️ **IDENTITY JUDGE (Priority #1)**:
-   - **Goal**: definitive identification of the speaker.
-   - **Input**: Use the 'Acoustic Scorecard' (Hard Evidence) + 'Conversation History' (Flow) + 'Linguistic Style' (Soft Evidence).
-   - **Logic**:
-     - *High Acoustic Score (>80%)* + *Context Fits* -> **CONFIRM_EXISTING**
-     - *Low Acoustic Score* + *Context Mismatch* -> **NEW_SPEAKER**
-     - *Ambiguous Acoustic*: Trust the **Conversation Flow** (Who was asked a question?) and **Style** (Who uses these words?).
+1. 🕵️ **ROSTER MANAGER (Priority #1)**:
+   - **Goal**: Maintain a clean, accurate list of speakers. Avoid 'Ghost Speakers' caused by noise.
+   - **Identity Decisions**:
+     - **CONFIRM_EXISTING**: Acoustic score is high (>0.80) AND context fits the history.
+     - **NEW_SPEAKER**: Acoustic scores are all low (<0.60) AND the context suggests a new participant.
+     - **MERGE**: If you detect a 'New Speaker' but their language/gender/context matches an existing speaker who has very few utterances (a 'Ghost'), you must **MERGE** them into that primary speaker to clean the history.
+   - **Strategy**: Trust the **Conversation Flow** (who was asked a question?) and **Social Roles** over weak acoustic signals.
 
 2. 🌐 **TRANSLATION & ROUTING**:
-   - Detect the input language.
+   - Detect the input language (romanized or native script) .
    - **Routing Rule**: 
      - If {primaryLang} -> Translate to {secondaryLang}.
      - If {secondaryLang} -> Translate to {primaryLang}.
@@ -79,43 +81,48 @@ You will receive a user message containing:
 **STRICT JSON OUTPUT FORMAT**:
 ```json
 {{
-  ""improvedTranscription"": ""Cleaned text (no stutter) in native script, as transcription could be romanized"",
-  ""translation"": ""Target language translation"",
+  ""improvedTranscription"": ""Cleaned text (no stutter) in native script, as transcription could be romanized. Remove any duplication of sentences or words, and improve grammar/structure."",
+  ""translation"": ""Target language translation for the improved text"",
   ""intent"": ""SIMPLE_TRANSLATION"" | ""AI_ASSISTANCE"",
   ""translationLanguage"": ""Target BCP-47"",
-  ""audioLanguage"": ""Detected Source BCP-47, the transcript could be in roman transcript as well, see possibilities form routing rules"",
+  ""audioLanguage"": ""Detected Source BCP-47"",
   ""confidence"": 0.98,
   
-  ""speakerIdentification"": {{
-    ""decision"": ""CONFIRMED_EXISTING"" | ""NEW_SPEAKER"" | ""UNCERTAIN"",
-    ""finalSpeakerId"": ""speaker_id"" or null,
-    ""confidence"": 0.95,
-    ""reasoning"": ""Scorecard showed 92% match for Speaker A, and context fits.""
+  ""turnAnalysis"": {{
+    ""activeSpeakerId"": ""speaker_1"",
+    ""identificationConfidence"": 0.98,
+    ""decisionType"": ""CONFIRMED"" | ""NEW"" | ""MERGE"",
+    ""mergeDetails"": {{
+      ""ghostIdToRemove"": ""speaker_7"", 
+      ""targetIdToKeep"": ""speaker_1""
+    }}
   }},
 
-  ""speakerProfileUpdate"": {{
-    ""speakerId"": ""speaker_id"",
-    ""suggestedName"": ""Extracted Name if introduced"",
-    ""estimatedGender"": ""Male"" | ""Female"" | ""Unknown"",
-    ""preferredLanguage"": ""Detected specific preference"",
-    ""newVocabulary"": [""unique"", ""words""],
-    ""tone"": ""formal"" | ""casual""
-  }},
+  ""sessionRoster"": [
+    {{
+      ""speakerId"": ""speaker_1"",
+      ""displayName"": ""Farhan"",
+      ""socialRole"": ""Interviewer"" | ""Doctor"" | ""Client"" | ""Host"",
+      ""estimatedGender"": ""Male"" | ""Female"" | ""Unknown"",
+      ""preferredLanguage"": ""ur-PK"",
+      ""tone"": ""formal"" | ""casual"",
+      ""isLocked"": true 
+    }}
+  ],
 
   ""aiAssistance"": {{
     ""triggerDetected"": true | false,
     ""response"": ""Your helpful answer, it may be from facts, previous turns, context, model (generic), specific internet lookup for realtime info"",
-    ""responseTranslated"": ""Translated answer"",
+    ""responseTranslated"": ""Translated AI response"",
     ""confidence"": 0.98
   }},
 
   ""factExtraction"": {{
     ""requiresFactExtraction"": true | false,
-    ""facts"": [""Meeting at 5pm"", ""Budget approved""]
+    ""facts"": [""Meeting at 5pm"", ""Budget approved""]      
   }}
 }}
-```
-";
+```";
     }
 
     private async Task<string> BuildUserPromptAsync(EnhancedTranslationRequest request)
@@ -126,34 +133,54 @@ You will receive a user message containing:
         prompt.AppendLine($"**Transcription:** \"{request.Text}\"");
         prompt.AppendLine();
 
-        string sessionId = request.SessionId ?? "unknown";
+        string sessionId = request.SessionId;
+        bool hasSession = !string.IsNullOrWhiteSpace(sessionId) && sessionId != "unknown";
 
-        // 🚀 CLEAN: Add speaker context from speaker management service
-        if (sessionId != "unknown")
+        // 🚀 CLEAN: Add Neural Speaker Roster context
+        if (hasSession)
         {
             var speakerContext = await _speakerService.BuildSpeakerPromptContextAsync(sessionId);
-            prompt.AppendLine("### SPEAKER IDENTIFICATION CONTEXT:");
-            prompt.AppendLine(speakerContext);
+            prompt.AppendLine("### 📋 CURRENT SPEAKER ROSTER (Known Participants):");
+            if (string.IsNullOrWhiteSpace(speakerContext) || speakerContext == "None.")
+                prompt.AppendLine("- No participants identified yet.");
+            else
+                prompt.AppendLine(speakerContext);
             prompt.AppendLine();
         }
 
         // Add acoustic signal if available
         if (request.SessionContext != null)
         {
-            // 🚀 NEW: Render the Acoustic Scorecard
+            // 🚀 NEW: Render Neural Provisional Evidence (What we heard during the stream)
+            if (request.SessionContext.TryGetValue("provisionalId", out var provId) && provId != null)
+            {
+                var provName = request.SessionContext.TryGetValue("provisionalName", out var name) ? name : "Unknown";
+                prompt.AppendLine("### 🧬 NEURAL PROVISIONAL EVIDENCE:");
+                prompt.AppendLine($"- **PROVISIONAL MATCH**: The live monitor suggested **{provName}** ({provId})");
+                prompt.AppendLine();
+            }
+
+            // 🚀 NEW: Expected Language Hint (from dual-STT selection)
+            if (request.SessionContext.TryGetValue("expectedLanguageCode", out var expectedLang))
+            {
+                prompt.AppendLine($"**Expected Audio Language Hint:** {expectedLang}");
+                prompt.AppendLine();
+            }
+
+            // 🚀 NEW: Render the Neural Scorecard
             if (request.SessionContext.TryGetValue("speakerScorecard", out var scorecardObj) 
                 && scorecardObj is List<SpeakerComparisonResult> scorecard && scorecard.Count > 0)
             {
-                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD (Mathematical Evidence):");
-                foreach (var score in scorecard)
+                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD (Neural Similarity):");
+                foreach (var score in scorecard.Take(5))
                 {
-                    prompt.AppendLine($"- **{score.DisplayName}** ({score.SpeakerId}): {score.CompositeScore:P0} Similarity (Pitch:{score.PitchSimilarity:P0}, Timbre:{score.TimbreSimilarity:P0})");
+                    prompt.AppendLine($"- **{score.DisplayName}** ({score.SpeakerId}): {score.SimilarityScore:F4} Cosine Similarity");
                 }
             }
             else
             {
                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD:");
-               prompt.AppendLine("No matches found (New acoustic profile).");
+               prompt.AppendLine("No strong neural matches found (Possibly a new speaker).");
             }
 
             // 🚀 CONTEXT: Last 5 turns for flow analysis
@@ -193,11 +220,12 @@ You will receive a user message containing:
         
         prompt.AppendLine("### ANALYSIS INSTRUCTIONS:");
         prompt.AppendLine("1. **Language Detection**: Identify source language and apply routing rules");
-        prompt.AppendLine("2. **Speaker Analysis**: Compare against known speakers above using voice + linguistic patterns");
-        prompt.AppendLine("3. **Decision**: Determine if CONFIRMED_EXISTING, NEW_SPEAKER, or UNCERTAIN");
-        prompt.AppendLine("4. **Translation**: Provide natural translation with proper target language");
-        prompt.AppendLine("5. **Fact Extraction**: Extract only NEW facts not already in 'EXISTING SESSION FACTS'");
-        prompt.AppendLine("6. **Output**: Return complete JSON response with all analysis");
+        prompt.AppendLine("2. Use the **Neural Evidence** as a guide, but let the **Conversation History** be the final tie-breaker.");
+        prompt.AppendLine("3. If this speaker matches an existing profile but the score is low due to audio quality, use **CONFIRM_EXISTING** if the context is 100% certain.");
+        prompt.AppendLine("4. If this utterance belongs to a speaker you previously identified incorrectly, use the **MERGE** decision to fix it.");
+        prompt.AppendLine("5. **Translation**: Provide natural translation with proper target language");
+        prompt.AppendLine("6. **Fact Extraction**: Extract only NEW facts not already in 'EXISTING SESSION FACTS'");
+        prompt.AppendLine("7. **Output**: Return complete JSON response with all analysis");
         
         return prompt.ToString();
     }

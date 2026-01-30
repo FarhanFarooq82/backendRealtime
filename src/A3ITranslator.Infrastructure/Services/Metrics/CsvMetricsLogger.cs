@@ -12,6 +12,7 @@ public class CsvMetricsLogger : IMetricsService
 {
     private readonly string _usageLogPath;
     private readonly string _promptLogPath;
+    private readonly string _cycleLogPath;
     private readonly SemaphoreSlim _fileLock = new SemaphoreSlim(1, 1);
     private readonly ILogger<CsvMetricsLogger> _logger;
 
@@ -21,6 +22,7 @@ public class CsvMetricsLogger : IMetricsService
         var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
         _usageLogPath = Path.Combine(baseDir, "usage_metrics.csv");
         _promptLogPath = Path.Combine(baseDir, "prompt_history.csv");
+        _cycleLogPath = Path.Combine(baseDir, "cycle_metrics.csv");
         InitializeLogFiles();
     }
 
@@ -45,9 +47,17 @@ public class CsvMetricsLogger : IMetricsService
             // Initialize Prompt History File
             if (!File.Exists(_promptLogPath))
             {
-                var header = "Timestamp,SessionId,Category,Operation,SystemPrompt,UserPrompt,Response";
+                // ✨ REMOVED SystemPrompt from CSV Header
+                var header = "Timestamp,SessionId,Category,Operation,UserPrompt,Response";
                 File.WriteAllText(_promptLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created prompt history log at: {_promptLogPath}");
+            }
+            // Initialize Cycle Metrics File
+            if (!File.Exists(_cycleLogPath))
+            {
+                var header = "Timestamp,SessionId,ConnectionId,CycleStartTime,VADTriggerTime,GenAIStartTime,GenAIEndTime,CycleEndTime,AudioDurationSec,STTCost,GenAICost,TTSCost,TotalCost,GenAILatencyMs,ImprovedTranscription,Translation";
+                File.WriteAllText(_cycleLogPath, header + Environment.NewLine, Encoding.UTF8);
+                Console.WriteLine($"✅ METRICS: Created cycle log at: {_cycleLogPath}");
             }
         }
         catch (Exception ex)
@@ -83,15 +93,14 @@ public class CsvMetricsLogger : IMetricsService
             await File.AppendAllTextAsync(_usageLogPath, usageLine + Environment.NewLine, Encoding.UTF8);
 
             // 2. Append to Prompt History (Text Data)
-            // Only log if there is actually some text data to store
-            if (!string.IsNullOrWhiteSpace(metrics.UserPrompt) || !string.IsNullOrWhiteSpace(metrics.Response) || !string.IsNullOrWhiteSpace(metrics.SystemPrompt))
+            // ✨ REMOVED SystemPrompt from logging
+            if (!string.IsNullOrWhiteSpace(metrics.UserPrompt) || !string.IsNullOrWhiteSpace(metrics.Response))
             {
-                var promptLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6}",
+                var promptLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5}",
                     metrics.Timestamp,
                     EscapeCsv(metrics.SessionId),
                     metrics.Category,
                     EscapeCsv(metrics.Operation),
-                    EscapeCsv(metrics.SystemPrompt),
                     EscapeCsv(metrics.UserPrompt),
                     EscapeCsv(metrics.Response));
 
@@ -110,13 +119,46 @@ public class CsvMetricsLogger : IMetricsService
         }
     }
 
+    public async Task LogCycleMetricsAsync(CycleMetrics metrics)
+    {
+        await _fileLock.WaitAsync();
+        try
+        {
+            var line = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3:yyyy-MM-dd HH:mm:ss.fff},{4:yyyy-MM-dd HH:mm:ss.fff},{5:yyyy-MM-dd HH:mm:ss.fff},{6:yyyy-MM-dd HH:mm:ss.fff},{7:yyyy-MM-dd HH:mm:ss.fff},{8:F4},{9:F6},{10:F6},{11:F6},{12:F6},{13},{14},{15}",
+                metrics.Timestamp,
+                EscapeCsv(metrics.SessionId),
+                EscapeCsv(metrics.ConnectionId),
+                metrics.CycleStartTime,
+                metrics.VADTriggerTime,
+                metrics.GenAIStartTime,
+                metrics.GenAIEndTime,
+                metrics.CycleEndTime,
+                metrics.AudioDurationSec,
+                metrics.STTCost,
+                metrics.GenAICost,
+                metrics.TTSCost,
+                metrics.TotalCost,
+                metrics.GenAILatencyMs,
+                EscapeCsv(metrics.ImprovedTranscription),
+                EscapeCsv(metrics.Translation));
+
+            await File.AppendAllTextAsync(_cycleLogPath, line + Environment.NewLine, Encoding.UTF8);
+            Console.WriteLine($"✅ CYCLE LOGGED: {metrics.SessionId}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write cycle metrics to CSV");
+        }
+        finally
+        {
+            _fileLock.Release();
+        }
+    }
+
     private string EscapeCsv(string value)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
-        
-        // Remove literal newlines to keep CSV structure, replace with a space or marker
         var cleaned = value.Replace("\r", " ").Replace("\n", " ");
-        
         if (cleaned.Contains(",") || cleaned.Contains("\""))
         {
             return "\"" + cleaned.Replace("\"", "\"\"") + "\"";

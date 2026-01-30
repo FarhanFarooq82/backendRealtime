@@ -36,6 +36,7 @@ public class STTOrchestrator : IStreamingSTTService
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var googleSucceeded = false;
+        var isCancelled = false;
 
         // 🎯 GOOGLE STT PHASE (Real-time consumption)
         IAsyncEnumerator<TranscriptionResult>? googleEnumerator = null;
@@ -60,6 +61,23 @@ public class STTOrchestrator : IStreamingSTTService
                     result = googleEnumerator.Current;
                     if (result.IsFinal) googleSucceeded = true;
                 }
+                catch (Exception ex) when (ex is OperationCanceledException || ex is TaskCanceledException || 
+                    (ex is Grpc.Core.RpcException rpc && (rpc.StatusCode == Grpc.Core.StatusCode.Cancelled || rpc.StatusCode == Grpc.Core.StatusCode.Aborted)))
+                {
+                    _logger.LogDebug("🎬 STT Orchestrator: Google STT stream stopped (Status: {Status}) for {Language}", 
+                        ex is Grpc.Core.RpcException g ? g.StatusCode.ToString() : "Cancelled", language);
+                    isCancelled = true;
+                    break;
+                }
+                catch (Exception ex) when (ex is Grpc.Core.RpcException rpc && rpc.StatusCode == Grpc.Core.StatusCode.InvalidArgument)
+                {
+                    // 🛡️ GOOGLE STT: Handle 'Failed to transcode audio' (occurs if stream is too short or lacks header)
+                    // We treat this as a clean stop to avoid falling back to Azure for empty gaps.
+                    _logger.LogDebug("🎬 STT Orchestrator: Google STT stream stopped by server (Status: InvalidArgument) for {Language} - Msg: {Msg}", 
+                        language, rpc.Status.Detail);
+                    isCancelled = true; 
+                    break;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "❌ STT Orchestrator: Google STT stream error for {Language}", language);
@@ -71,8 +89,8 @@ public class STTOrchestrator : IStreamingSTTService
             await googleEnumerator.DisposeAsync();
         }
 
-        // 🎯 AZURE FALLBACK PHASE (If Google didn't produce a final result)
-        if (!googleSucceeded)
+        // 🎯 AZURE FALLBACK PHASE (If Google didn't produce a final result AND wasn't cancelled)
+        if (!googleSucceeded && !isCancelled)
         {
             _logger.LogWarning("🔄 STT Orchestrator: Falling back to Azure STT for language: {Language}", language);
             IAsyncEnumerator<TranscriptionResult>? azureEnumerator = null;
@@ -95,6 +113,11 @@ public class STTOrchestrator : IStreamingSTTService
                     {
                         if (!await azureEnumerator.MoveNextAsync()) break;
                         result = azureEnumerator.Current;
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException || ex is TaskCanceledException)
+                    {
+                        _logger.LogDebug("🎬 STT Orchestrator: Azure STT fallback cancelled for {Language}", language);
+                        break;
                     }
                     catch (Exception ex)
                     {

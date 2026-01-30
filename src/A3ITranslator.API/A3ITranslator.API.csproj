@@ -16,4 +16,11 @@
     <ProjectReference Include="..\A3ITranslator.Infrastructure\A3ITranslator.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!-- ✅ Copy ONNX model to output directory -->
+  <ItemGroup>
+    <None Include="models\**\*.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

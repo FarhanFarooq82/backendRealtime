@@ -9,17 +9,17 @@ namespace A3ITranslator.Application.Services;
 public interface IAudioFeatureExtractor
 {
     /// <summary>
-    /// Extract features from a single audio chunk and update the rolling accumulator.
-    /// This allows for zero-latency Feature Extraction by processing in background.
+    /// Accumulate audio chunks for later embedding extraction.
     /// </summary>
-    /// <param name="audioChunk">Raw PCM audio chunk</param>
-    /// <param name="accumulator">The rolling fingerprint state to update</param>
-    Task AccumulateFeaturesAsync(byte[] audioChunk, AudioFingerprint accumulator);
+    Task AccumulateAudioAsync(string connectionId, byte[] audioChunk);
 
     /// <summary>
-    /// Finalize and normalize the fingerprint after collection is complete.
+    /// Extract a neural embedding (Voice DNA) from the accumulated audio.
     /// </summary>
-    /// <param name="accumulator">The accumulated state</param>
-    /// <returns>A normalized, ready-to-use AudioFingerprint</returns>
-    AudioFingerprint FinalizeFingerprint(AudioFingerprint accumulator);
+    Task<float[]> ExtractEmbeddingAsync(string connectionId);
+
+    /// <summary>
+    /// Clear the audio buffer for a specific connection.
+    /// </summary>
+    void ClearBuffer(string connectionId);
 }

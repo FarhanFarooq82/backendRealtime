@@ -137,7 +137,7 @@ public class ServiceOptions
     /// Provider priority for GenAI services: OpenAI -> Gemini -> Azure
     /// Optimized for response quality and cost efficiency
     /// </summary>
-    public string[] GenAIProviderPriority { get; set; } = { "OpenAI", "Gemini", "Azure" };
+    public string[] GenAIProviderPriority { get; set; } = { "Gemini", "Azure", "OpenAI" };
     
     /// <summary>
     /// Provider priority for TTS services: Azure (primary)

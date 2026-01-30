@@ -2,7 +2,6 @@ using A3ITranslator.Application.Services;
 
 using A3ITranslator.Application.DTOs.Common;
 using A3ITranslator.Application.DTOs.Frontend;
-using A3ITranslator.Application.Interfaces;
 using A3ITranslator.API.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
@@ -49,26 +48,6 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task NotifyProcessingErrorAsync(string connectionId, string errorMessage) =>
         _hubContext.Clients.Client(connectionId).ReceiveProcessingError(errorMessage);
 
-    // ✅ NEW: Streaming translation capabilities
-    public Task SendResponseTypeAsync(string sessionId, ResponseType responseType) =>
-        _hubContext.Clients.Client(sessionId).ReceiveResponseType(responseType.ToString());
-
-    public Task SendProgressiveTextAsync(string sessionId, string textToken) =>
-        _hubContext.Clients.Client(sessionId).ReceiveProgressiveText(textToken);
-
-    public Task SendAudioChunkAsync(string sessionId, AudioChunkData audioChunk) =>
-        _hubContext.Clients.Client(sessionId).ReceiveAudioChunkWithText(
-            Convert.ToBase64String(audioChunk.AudioData),
-            audioChunk.AssociatedText,
-            audioChunk.IsFirstChunk,
-            audioChunk.ChunkIndex,
-            audioChunk.TotalChunks);
-
-    public Task SendConversationHistoryAsync(string sessionId, ConversationHistoryData historyData) =>
-        _hubContext.Clients.Client(sessionId).ReceiveConversationHistory(historyData);
-
-    public Task SendOperationCancelledAsync(string sessionId) =>
-        _hubContext.Clients.Client(sessionId).ReceiveOperationCancelled();
 
     public Task SendCycleCompletionAsync(string sessionId, bool readyForNext) =>
         _hubContext.Clients.Client(sessionId).ReceiveCycleCompletion(readyForNext);

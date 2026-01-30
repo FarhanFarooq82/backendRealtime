@@ -136,6 +136,37 @@ public class ConversationSession
         }
     }
 
+    /// <summary>
+    /// Retroactively merges two speakers in session history
+    /// </summary>
+    public void MergeSpeakers(string ghostId, string targetId)
+    {
+        lock (_lock)
+        {
+            var targetSpeaker = GetSpeaker(targetId);
+            if (targetSpeaker == null) return;
+
+            // 1. Update all conversation turns
+            foreach (var turn in _conversationHistory.Where(t => t.SpeakerId == ghostId))
+            {
+                turn.UpdateSpeaker(targetId, targetSpeaker.DisplayName);
+            }
+
+            // 2. Remove the ghost from roster
+            var ghost = _speakers.FirstOrDefault(s => s.SpeakerId == ghostId);
+            if (ghost != null) _speakers.Remove(ghost);
+        }
+    }
+
+    public void RemoveSpeaker(string speakerId)
+    {
+        lock (_lock)
+        {
+            var speaker = _speakers.FirstOrDefault(s => s.SpeakerId == speakerId);
+            if (speaker != null) _speakers.Remove(speaker);
+        }
+    }
+
     public void EndSession(SessionStatus endStatus = SessionStatus.Completed)
     {
         Status = endStatus;
