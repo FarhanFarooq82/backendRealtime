@@ -21,7 +21,6 @@ using A3ITranslator.Infrastructure.Services.Translation; // ✅ For Conversation
 // ✅ PURE DOMAIN: Type aliases for clean architecture
 using DomainSession = A3ITranslator.Application.Domain.Entities.ConversationSession;
 using DomainConversationTurn = A3ITranslator.Application.Domain.Entities.ConversationTurn;
-using ModelConversationTurn = A3ITranslator.Application.Models.ConversationTurn;
 
 namespace A3ITranslator.Infrastructure.Services.Orchestration;
 
@@ -654,20 +653,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
     {
         await _lifecycleManager.FinalizeAndMailAsync(connectionId, emailAddresses);
     }
-
-
-    // --- Required Interface Methods ---
-    public Task<ConversationResult> ProcessTranscriptionAsync(string connectionId, string transcription, string detectedLanguage, float confidence, CancellationToken cancellationToken = default) 
-        => Task.FromResult(new ConversationResult { Success = true });
-    
-    public Task<bool> ProcessGeneratedResponseAsync(string connectionId, ConversationItem conversationItem, CancellationToken cancellationToken = default) 
-        => Task.FromResult(true);
-    
-    public Task CompleteConversationCycleAsync(string connectionId, string conversationItemId, CancellationToken cancellationToken = default) 
-        => Task.CompletedTask;
-    
-    public Task HandleConversationErrorAsync(string connectionId, string error, ConversationErrorSeverity severity, CancellationToken cancellationToken = default) 
-        => Task.CompletedTask;
 }
 
 /// <summary>

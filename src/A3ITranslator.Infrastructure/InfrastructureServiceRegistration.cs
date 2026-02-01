@@ -8,7 +8,6 @@ using A3ITranslator.Infrastructure.Services.Audio;
 using A3ITranslator.Infrastructure.Services.Azure;
 using A3ITranslator.Infrastructure.Services.Translation;
 using A3ITranslator.Infrastructure.Services.Metrics;
-using A3ITranslator.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -26,7 +25,6 @@ public static class InfrastructureServiceRegistration
         services.AddSingleton<GoogleStreamingSTTService>();
         services.AddSingleton<AzureStreamingSTTService>();
         services.AddSingleton<IStreamingSTTService, STTOrchestrator>();
-        services.AddSingleton<ILanguageDetectionService, LanguageDetectionService>();
         services.AddSingleton<IAudioFeatureExtractor>(sp => 
         {
             var logger = sp.GetRequiredService<ILogger<OnnxAudioFeatureExtractor>>();
@@ -38,9 +36,6 @@ public static class InfrastructureServiceRegistration
         });
         services.AddSingleton<ISpeakerIdentificationService, SpeakerIdentificationService>();
         
-        // ✅ Audio Test Services (Development/Debug)
-        services.AddSingleton<AudioTestCollector>();
-
         // ✅ AI and GenAI Services (with Priority and Failover)
         // Register all GenAI providers
         services.AddSingleton<A3ITranslator.Infrastructure.Services.Gemini.GeminiGenAIService>();
@@ -64,14 +59,12 @@ public static class InfrastructureServiceRegistration
             return new GenAIOrchestrator(logger, options, providers);
         });
         
-        services.AddSingleton<IFactExtractionService, FactExtractionService>();
-        
         // Add HttpClient for Gemini and OpenAI
         services.AddHttpClient("GeminiClient");
         services.AddHttpClient("OpenAIClient");
 
         // ✅ TTS Services
-        services.AddSingleton<IStreamingTTSService, StreamingTTSService>();
+        services.AddSingleton<IStreamingTTSService, AzureNeuralVoiceService>();
 
         // ✅ Translation Services
         services.AddSingleton<ITranslationPromptService, TranslationPromptService>();

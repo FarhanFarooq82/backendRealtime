@@ -1,5 +1,3 @@
-using A3ITranslator.Application.Models;
-
 namespace A3ITranslator.Application.Models.Speaker;
 
 /// <summary>

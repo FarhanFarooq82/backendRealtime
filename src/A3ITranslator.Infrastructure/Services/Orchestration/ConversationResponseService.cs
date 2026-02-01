@@ -8,8 +8,6 @@ using A3ITranslator.Application.Services.Frontend;
 using A3ITranslator.Application.Services.Speaker;
 using A3ITranslator.Application.Domain.Interfaces;
 using A3ITranslator.Application.Enums;
-using A3ITranslator.Infrastructure.Services.Audio;
-using A3ITranslator.Infrastructure.Services.Azure;
 using Microsoft.Extensions.Logging;
 using DomainConversationTurn = A3ITranslator.Application.Domain.Entities.ConversationTurn;
 
@@ -144,33 +142,7 @@ public class ConversationResponseService : IConversationResponseService
     {
         try
         {
-            var speakerGender = SpeakerGender.Unknown;
-            if (!string.IsNullOrEmpty(lastSpeakerId))
-            {
-                speakerGender = await _speakerSyncService.GetSpeakerGenderAsync(sessionId, lastSpeakerId);
-            }
-
-            if (_ttsService is AzureNeuralVoiceService neuralVoiceService)
-            {
-                await foreach (var chunk in neuralVoiceService.SynthesizeWithGenderAsync(
-                    text, language, speakerGender, VoiceStyle.Conversational, isPremium: false))
-                {
-                    var chunkItem = _frontendService.CreateTTSChunk(
-                        "neural-tts-" + Guid.NewGuid().ToString()[..8],
-                        Convert.ToBase64String(chunk.AudioData),
-                        chunk.AssociatedText,
-                        chunk.ChunkIndex,
-                        chunk.TotalChunks,
-                        0.0,
-                        "audio/mp3"
-                    );
-                    await _notificationService.SendFrontendTTSChunkAsync(connectionId, chunkItem);
-                }
-            }
-            else
-            {
-                await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
-            }
+            await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
         }
         catch (Exception ex)
         {
@@ -182,49 +154,22 @@ public class ConversationResponseService : IConversationResponseService
     {
         try
         {
-            var speakerGender = SpeakerGender.Unknown;
-            if (!string.IsNullOrEmpty(lastSpeakerId))
-            {
-                speakerGender = await _speakerSyncService.GetSpeakerGenderAsync(sessionId, lastSpeakerId);
-            }
+            await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
 
-            if (_ttsService is AzureNeuralVoiceService neuralVoiceService)
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
             {
-                var conversationItemId = "continuous-tts-" + Guid.NewGuid().ToString()[..8];
-                await foreach (var chunk in neuralVoiceService.SynthesizeWithGenderAsync(
-                    text, language, speakerGender, VoiceStyle.Conversational, isPremium: false))
-                {
-                    var chunkItem = _frontendService.CreateTTSChunk(
-                        conversationItemId,
-                        Convert.ToBase64String(chunk.AudioData),
-                        chunk.AssociatedText,
-                        chunk.ChunkIndex,
-                        chunk.TotalChunks,
-                        0.0,
-                        "audio/mp3"
-                    );
-                    await _notificationService.SendFrontendTTSChunkAsync(connectionId, chunkItem);
-                }
-
-                _ = _metricsService.LogMetricsAsync(new UsageMetrics
-                {
-                    SessionId = sessionId,
-                    ConnectionId = connectionId,
-                    Category = ServiceCategory.TTS,
-                    Provider = "Azure",
-                    Operation = "NeuralTTS",
-                    OutputUnits = text.Length,
-                    OutputUnitType = "Characters",
-                    UserPrompt = text,
-                    Response = "AUDIO_STREAM",
-                    CostUSD = text.Length * 0.000016,
-                    Status = "Success"
-                });
-            }
-            else
-            {
-                await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
-            }
+                SessionId = sessionId,
+                ConnectionId = connectionId,
+                Category = ServiceCategory.TTS,
+                Provider = "Azure",
+                Operation = "StreamingTTS",
+                OutputUnits = text.Length,
+                OutputUnitType = "Characters",
+                UserPrompt = text,
+                Response = "AUDIO_STREAM",
+                CostUSD = text.Length * 0.000015,
+                Status = "Success"
+            });
         }
         catch (Exception ex)
         {
