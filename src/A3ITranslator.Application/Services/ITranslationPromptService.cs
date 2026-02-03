@@ -10,7 +10,7 @@ public interface ITranslationPromptService
     Task<(string systemPrompt, string userPrompt)> BuildTranslationPromptsAsync(EnhancedTranslationRequest request);
 
     /// <summary>
-    /// Build prompts for generating a concise conversation summary
+    /// Build prompts for generating a native-language summary with AI-generated headings
     /// </summary>
-    Task<(string systemPrompt, string userPrompt)> BuildSummaryPromptsAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage);
+    Task<(string systemPrompt, string userPrompt)> BuildNativeSummaryPromptsAsync(string conversationHistory, string language);
 }

@@ -42,8 +42,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IConversationLifecycleManager _lifecycleManager;
     private readonly ITranslationService _translationService;
     private readonly IConversationResponseService _responseService;
-    private readonly IFactService _factService;
     private readonly IMetricsService _metricsService;
+    private readonly ITranslationOrchestrator _translationOrchestrator;
 
     // Per-connection conversation state
     private readonly Dictionary<string, ConversationState> _connectionStates = new();
@@ -61,10 +61,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IConversationLifecycleManager lifecycleManager,
         ITranslationService translationService,
         IConversationResponseService responseService,
-        IFactService factService,
-        IMetricsService metricsService)
+        IMetricsService metricsService,
+        ITranslationOrchestrator translationOrchestrator)
     {
-        _logger = logger;
         _notificationService = notificationService;
         _ttsService = ttsService;
         _sessionRepository = sessionRepository;
@@ -75,8 +74,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _lifecycleManager = lifecycleManager;
         _translationService = translationService;
         _responseService = responseService;
-        _factService = factService;
         _metricsService = metricsService;
+        _translationOrchestrator = translationOrchestrator;
+        _logger = logger;
     }
 
     /// <summary>
@@ -442,6 +442,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     // Update state so the GenAI knows who we think is talking
                     state.ProvisionalSpeakerId = speakerId;
                     state.ProvisionalDisplayName = displayName;
+                    state.SpeakerMatchConfidence = confidence;
                 }
                 
                 // Update every 1.5 seconds
@@ -519,62 +520,121 @@ public class ConversationOrchestrator : IConversationOrchestrator
         string connectionId, 
         ConversationState state)
     {
+        string turnId = Guid.NewGuid().ToString();
         try
         {
-            _logger.LogInformation("🎯 Processing completed utterance for {ConnectionId}", connectionId);
+            _logger.LogInformation("🎯 {TurnId}: Processing parallel Pulse & Brain cycle for {ConnectionId}", turnId, connectionId);
 
             var utteranceWithContext = state.GetCompleteUtterance();
 
-            // 1. GENAI TRANSLATION
-            state.GenAIStartTime = DateTime.UtcNow;
-            var genAIResponse = await _translationService.ProcessTranslationAsync(
+            // 1. START PARALLEL TRACKS
+            // Track A: Pulse (Fast Translation)
+            var pulseTask = _translationService.ProcessTranslationAsync(
                 state.SessionId!, 
                 utteranceWithContext, 
                 state.LastSpeakerId, 
                 state.ProvisionalSpeakerId, 
-                state.ProvisionalDisplayName);
-            state.GenAIEndTime = DateTime.UtcNow;
+                state.ProvisionalDisplayName,
+                turnId,
+                true); // IsPulse = true
 
-            // 2. SPEAKER SYNCHRONIZATION
-            var speakerPayload = new Application.DTOs.Translation.SpeakerServicePayload
-            {
-                TurnAnalysis = genAIResponse.TurnAnalysis,
-                Roster = genAIResponse.SessionRoster,
-                AudioLanguage = genAIResponse.AudioLanguage,
-                TranscriptionConfidence = utteranceWithContext.TranscriptionConfidence,
-                AudioFingerprint = utteranceWithContext.AudioFingerprint
-            };
-
-            var speakerResult = await _speakerSyncService.IdentifySpeakerAfterUtteranceAsync(state.SessionId!, speakerPayload);
-            state.LastSpeakerId = speakerResult.SpeakerId;
-
-            // 3. FACT STORAGE
-            if (genAIResponse.FactExtraction?.RequiresFactExtraction == true)
-            {
-                await _factService.StoreExtractedFactsAsync(state.SessionId!, genAIResponse);
-            }
-
-            // 4. PARALLEL RESPONSE DELIVERY
-            state.StartCompleting();
-            await _responseService.SendResponseAsync(
-                connectionId, 
+            // Track B: Brain (Deep Analysis)
+            var brainTask = _translationService.ProcessTranslationAsync(
                 state.SessionId!, 
-                state.LastSpeakerId,
                 utteranceWithContext, 
-                genAIResponse, 
-                speakerResult);
-            
-            state.ResponseSentTime = DateTime.UtcNow;
+                state.LastSpeakerId, 
+                state.ProvisionalSpeakerId, 
+                state.ProvisionalDisplayName,
+                turnId,
+                false); // IsPulse = false
 
-            // 📊 CYCLE METRICS
-            await LogCycleMetricsAsync(connectionId, state, genAIResponse, utteranceWithContext);
+                state.GenAIStartTime = DateTime.UtcNow;
+
+                // 2. AWAIT PULSE (Immediate Audio delivery)
+                var pulseResponse = await pulseTask;
+                state.GenAIEndTime = DateTime.UtcNow;
+
+                _logger.LogInformation("⚡ {TurnId}: Pulse track ready. Streaming audio...", turnId);
+
+                // FIRE PULSE AUDIO IMMEDIATELY (Zero-latency speech)
+                _ = _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.LastSpeakerId, pulseResponse);
+
+                // If Pulse already knows it's an AI task, show "Thinking..." status
+                if (pulseResponse.Intent == "AI_ASSISTANCE")
+                {
+                    await _notificationService.NotifyProcessingStatusAsync(connectionId, "🤖 Assistant is thinking...");
+                }
+
+                // 3. AWAIT BRAIN (Contextual refinement)
+                var brainResponse = await brainTask;
+                _logger.LogInformation("🧠 {TurnId}: Brain enrichment completed. Merging...", turnId);
+
+                // 4. MERGE RESULTS (Convergance)
+                // We trust Brain for most things, but Pulse might be the baseline
+                if (string.IsNullOrEmpty(brainResponse.Translation) && !string.IsNullOrEmpty(pulseResponse.Translation))
+                {
+                    brainResponse.Translation = pulseResponse.Translation;
+                    brainResponse.TranslationLanguage = pulseResponse.TranslationLanguage;
+                }
+
+                // 5. SPEAKER IDENTIFICATION & STATE UPDATE
+                var speakerResult = await SyncSpeakerAndFactsAsync(state, brainResponse, utteranceWithContext);
+                state.LastSpeakerId = speakerResult.SpeakerId;
+
+                // 6. SHIP FINAL MERGED RESPONSE (Single Conversation Item)
+                state.StartCompleting();
+                await _responseService.SendResponseAsync(connectionId, state.SessionId!, state.LastSpeakerId, utteranceWithContext, brainResponse, speakerResult);
+                
+                state.ResponseSentTime = DateTime.UtcNow;
+
+                // 7. BACKGROUND TASKS
+                _ = UpdateRollingSummaryIfNeededAsync(state);
+                _ = LogCycleMetricsAsync(connectionId, state, brainResponse, utteranceWithContext);
+            
 
             await _notificationService.NotifyCycleCompletionAsync(connectionId, false);
-            _logger.LogInformation("✅ Utterance processing completed for {ConnectionId}", connectionId);
+            _logger.LogInformation("✅ {TurnId}: Utterance pulse delivered for {ConnectionId}", turnId, connectionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error finalising utterance for {ConnectionId}", connectionId);
+            _logger.LogError(ex, "❌ {TurnId}: Error finalising utterance for {ConnectionId}", turnId, connectionId);
+        }
+    }
+
+    private async Task<SpeakerOperationResult> SyncSpeakerAndFactsAsync(
+        ConversationState state, 
+        A3ITranslator.Application.DTOs.Translation.EnhancedTranslationResponse brainResponse, 
+        UtteranceWithContext utteranceWithContext)
+    {
+        // 2. SPEAKER SYNCHRONIZATION
+        var speakerPayload = new Application.DTOs.Translation.SpeakerServicePayload
+        {
+            TurnAnalysis = brainResponse.TurnAnalysis,
+            Roster = brainResponse.SessionRoster,
+            AudioLanguage = brainResponse.AudioLanguage,
+            TranscriptionConfidence = utteranceWithContext.TranscriptionConfidence,
+            AudioFingerprint = utteranceWithContext.AudioFingerprint
+        };
+
+        var speakerResult = await _speakerSyncService.IdentifySpeakerAfterUtteranceAsync(state.SessionId!, speakerPayload);
+        state.LastSpeakerId = speakerResult.SpeakerId;
+        
+        return speakerResult;
+    }
+
+    private async Task UpdateRollingSummaryIfNeededAsync(ConversationState state)
+    {
+        try
+        {
+            var session = await _sessionRepository.GetByIdAsync(state.SessionId!, CancellationToken.None);
+            if (session == null) return;
+
+            // Rolling summaries removed - not needed for 3-4 hour meetings
+            // Summary generation happens on-demand only via RequestSummaryAsync
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed in perpetual summary task");
         }
     }
 

@@ -69,6 +69,7 @@ public class ConversationSession
     {
         lock(_lock)
         {
+            turn.SequenceNumber = _conversationHistory.Count + 1;
             _conversationHistory.Add(turn);
             Statistics.TotalTurns++;
             UpdateActivity();

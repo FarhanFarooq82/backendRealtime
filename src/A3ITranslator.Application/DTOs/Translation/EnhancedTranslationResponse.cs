@@ -14,6 +14,7 @@ public class EnhancedTranslationResponse
     public string Intent { get; set; } = "SIMPLE_TRANSLATION"; 
     public string TranslationLanguage { get; set; } = string.Empty;
     public string AudioLanguage { get; set; } = string.Empty;
+    public string EstimatedGender { get; set; } = "Unknown";
     public float Confidence { get; set; } = 0f;
 
     // ✨ NEW: Turn Analysis (Speaker ID and Actions)
@@ -34,6 +35,10 @@ public class EnhancedTranslationResponse
     public double ProcessingTimeMs { get; set; }
     public string ProviderUsed { get; set; } = string.Empty;
     public GenAIUsage Usage { get; set; } = new();
+    
+    // Pulse/Brain Correlation
+    public string TurnId { get; set; } = string.Empty;
+    public bool IsPulse { get; set; }
 }
 
 public class TurnAnalysisData
@@ -74,8 +79,7 @@ public class AIAssistanceData
 
 public class FactExtractionPayload
 {
-    public bool RequiresFactExtraction { get; set; } = false;
-    public List<string> Facts { get; set; } = new();
+    public bool HasSignificantInfo { get; set; } = false;
 }
 
 public class SpeakerServicePayload

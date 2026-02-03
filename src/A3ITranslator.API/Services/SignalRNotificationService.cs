@@ -2,6 +2,7 @@ using A3ITranslator.Application.Services;
 
 using A3ITranslator.Application.DTOs.Common;
 using A3ITranslator.Application.DTOs.Frontend;
+using A3ITranslator.Application.DTOs.Summary;
 using A3ITranslator.API.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
@@ -25,8 +26,8 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task NotifyErrorAsync(string connectionId, string message) =>
         _hubContext.Clients.Client(connectionId).ReceiveError(message);
 
-    public Task NotifyAudioChunkAsync(string connectionId, string base64Audio) =>
-    _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(base64Audio);
+    public Task NotifyAudioChunkAsync(string connectionId, byte[] audioChunk) =>
+    _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(audioChunk);
 
     public Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal) =>
         _hubContext.Clients.Client(connectionId).ReceiveTranslation(text, language, isFinal);
@@ -72,8 +73,8 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk) =>
         _hubContext.Clients.Client(connectionId).ReceiveFrontendTTSChunk(ttsChunk);
 
-    public Task SendSessionSummaryAsync(string connectionId, string summaryText) =>
-        _hubContext.Clients.Client(connectionId).ReceiveSessionSummary(summaryText);
+    public Task SendStructuredSummaryAsync(string connectionId, SessionSummaryDTO summary) =>
+        _hubContext.Clients.Client(connectionId).ReceiveStructuredSummary(summary);
 
     public Task SendFinalizationSuccessAsync(string connectionId) =>
         _hubContext.Clients.Client(connectionId).ReceiveFinalizationSuccess();

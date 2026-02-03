@@ -156,34 +156,48 @@ public class HubClient : Hub<IHubClient>, IDisposable
 
     /// <summary>
     /// Process audio chunk from frontend - simplified for clean architecture
-    /// Accepts: { audioData: base64Audio, timestamp: chunk.timestamp }
+    /// Accepts: { audioData: uint8Array/Base64, timestamp: number }
     /// </summary>
     public async Task SendAudioChunk(AudioChunkPayload payload)
     {
         try
         {
-            // _logger.LogDebug("🎤 Received audio chunk: {Size} bytes", payload.AudioData?.Length ?? 0);
+            _logger.LogInformation("🎤 RECEIVED SendAudioChunk call for {ConnectionId}", Context.ConnectionId);
+            
+            if (payload == null)
+            {
+                _logger.LogWarning("⚠️ Payload is NULL for {ConnectionId}", Context.ConnectionId);
+                return;
+            }
+            
+            _logger.LogInformation("📦 Payload received - AudioData: {AudioDataType}, Length: {Length}, Timestamp: {Timestamp}", 
+                payload.AudioData?.GetType().Name ?? "null", 
+                payload.AudioData?.Length ?? 0, 
+                payload.Timestamp);
 
             if (_hubCancellationTokenSource.Token.IsCancellationRequested)
                 return;
 
-            byte[] audioBytes = Convert.FromBase64String(payload.AudioData);
+            if (payload.AudioData == null || payload.AudioData.Length == 0)
+            {
+                _logger.LogWarning("⚠️ Empty audio data for {ConnectionId}", Context.ConnectionId);
+                return;
+            }
+            
+            _logger.LogDebug("✅ Sending {Bytes} bytes to ProcessAudioChunkCommand", payload.AudioData.Length);
             
             // ✅ CLEAN ARCHITECTURE: Delegate to Domain via Command
             await _mediator.Send(new ProcessAudioChunkCommand(
                 Context.ConnectionId, 
-                audioBytes, 
+                payload.AudioData, 
                 payload.Timestamp));
-        }
-        catch (FormatException ex)
-        {
-            _logger.LogError(ex, "❌ Invalid base64 audio data for {ConnectionId}", Context.ConnectionId);
-            await Clients.Caller.ReceiveError("Invalid audio format");
+                
+            _logger.LogDebug("✅ Audio chunk processed successfully");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Audio processing error for {ConnectionId}", Context.ConnectionId);
-            await Clients.Caller.ReceiveError("Audio processing failed");
+            _logger.LogError(ex, "❌ Audio processing error for {ConnectionId}: {Message}", Context.ConnectionId, ex.Message);
+            await Clients.Caller.ReceiveError($"Audio processing failed: {ex.Message}");
         }
     }
 

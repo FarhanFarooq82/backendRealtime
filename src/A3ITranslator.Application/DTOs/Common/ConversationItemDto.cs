@@ -92,9 +92,9 @@ public class ConversationItem
 public class TTSAudioSegment
 {
     /// <summary>
-    /// Base64-encoded audio data chunk
+    /// Raw audio data chunk (previously Base64 string)
     /// </summary>
-    public string AudioData { get; set; } = string.Empty;
+    public byte[] AudioData { get; set; } = Array.Empty<byte>();
 
     /// <summary>
     /// Text that this audio segment represents

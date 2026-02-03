@@ -18,15 +18,18 @@ public class AzureNeuralVoiceService : IStreamingTTSService
     private readonly ServiceOptions _options;
     private readonly ILogger<AzureNeuralVoiceService> _logger;
     private readonly IRealtimeNotificationService _notificationService;
+    private readonly ISpeakerVoiceAssignmentService _voiceAssignmentService;
 
     public AzureNeuralVoiceService(
         IOptions<ServiceOptions> options, 
         ILogger<AzureNeuralVoiceService> logger,
-        IRealtimeNotificationService notificationService)
+        IRealtimeNotificationService notificationService,
+        ISpeakerVoiceAssignmentService voiceAssignmentService)
     {
         _options = options.Value;
         _logger = logger;
         _notificationService = notificationService;
+        _voiceAssignmentService = voiceAssignmentService;
     }
 
     #region Azure Neural Voice Configuration by Language and Gender
@@ -95,20 +98,60 @@ public class AzureNeuralVoiceService : IStreamingTTSService
                     new("en-GB-SoniaNeural", "Sonia", VoiceStyle.Conversational, true),
                     new("en-GB-LibbyNeural", "Libby", VoiceStyle.Professional, true),
                     new("en-GB-MaisieNeural", "Maisie", VoiceStyle.Young, true),
-                    new("en-GB-BellaNeural", "Bella", VoiceStyle.Cheerful, true)
+                    new("en-GB-BellaNeural", "Bella", VoiceStyle.Cheerful, true),
+                    new("en-GB-AbbiNeural", "Abbi", VoiceStyle.Warm, true)
                 },
                 [SpeakerGender.Male] = new()
                 {
                     new("en-GB-RyanNeural", "Ryan", VoiceStyle.Conversational, true),
                     new("en-GB-ThomasNeural", "Thomas", VoiceStyle.Professional, true),
                     new("en-GB-AlfieNeural", "Alfie", VoiceStyle.Young, true),
-                    new("en-GB-ElliotNeural", "Elliot", VoiceStyle.Warm, true)
+                    new("en-GB-ElliotNeural", "Elliot", VoiceStyle.Warm, true),
+                    new("en-GB-OliverNeural", "Oliver", VoiceStyle.Mature, true)
                 }
             },
             StandardVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
             {
                 [SpeakerGender.Female] = new() { new("en-GB-Susan", "Susan", VoiceStyle.Standard, false) },
                 [SpeakerGender.Male] = new() { new("en-GB-George", "George", VoiceStyle.Standard, false) }
+            }
+        },
+
+        // English (Australia) - en-AU
+        ["en-AU"] = new VoiceConfiguration
+        {
+            Language = "en-AU",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("en-AU-NatashaNeural", "Natasha", VoiceStyle.Conversational, true),
+                    new("en-AU-AnnetteNeural", "Annette", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("en-AU-WilliamNeural", "William", VoiceStyle.Conversational, true),
+                    new("en-AU-DarrenNeural", "Darren", VoiceStyle.Professional, true)
+                }
+            }
+        },
+
+        // English (India) - en-IN
+        ["en-IN"] = new VoiceConfiguration
+        {
+            Language = "en-IN",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("en-IN-NeerjaNeural", "Neerja", VoiceStyle.Conversational, true),
+                    new("en-IN-AnanyaNeural", "Ananya", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("en-IN-PrabhatNeural", "Prabhat", VoiceStyle.Conversational, true),
+                    new("en-IN-MadhurNeural", "Madhur", VoiceStyle.Professional, true)
+                }
             }
         },
 
@@ -154,6 +197,25 @@ public class AzureNeuralVoiceService : IStreamingTTSService
             }
         },
 
+        // Urdu (Pakistan) - ur-PK
+        ["ur-PK"] = new VoiceConfiguration
+        {
+            Language = "ur-PK",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("ur-PK-UzmaNeural", "Uzma", VoiceStyle.Conversational, true),
+                    new("ur-PK-ZainabNeural", "Zainab", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("ur-PK-AsadNeural", "Asad", VoiceStyle.Conversational, true),
+                    new("ur-PK-ImranNeural", "Imran", VoiceStyle.Professional, true)
+                }
+            }
+        },
+
         // Spanish (Spain) - es-ES
         ["es-ES"] = new VoiceConfiguration
         {
@@ -175,6 +237,25 @@ public class AzureNeuralVoiceService : IStreamingTTSService
             {
                 [SpeakerGender.Female] = new() { new("es-ES-Helena", "Helena", VoiceStyle.Standard, false) },
                 [SpeakerGender.Male] = new() { new("es-ES-Pablo", "Pablo Standard", VoiceStyle.Standard, false) }
+            }
+        },
+
+        // Spanish (Mexico) - es-MX
+        ["es-MX"] = new VoiceConfiguration
+        {
+            Language = "es-MX",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("es-MX-DaliaNeural", "Dalia", VoiceStyle.Conversational, true),
+                    new("es-MX-LarissaNeural", "Larissa", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("es-MX-JorgeNeural", "Jorge", VoiceStyle.Conversational, true),
+                    new("es-MX-GerardoNeural", "Gerardo", VoiceStyle.Professional, true)
+                }
             }
         },
 
@@ -201,6 +282,25 @@ public class AzureNeuralVoiceService : IStreamingTTSService
             {
                 [SpeakerGender.Female] = new() { new("fr-FR-Julie", "Julie", VoiceStyle.Standard, false) },
                 [SpeakerGender.Male] = new() { new("fr-FR-Paul", "Paul", VoiceStyle.Standard, false) }
+            }
+        },
+
+        // French (Canada) - fr-CA
+        ["fr-CA"] = new VoiceConfiguration
+        {
+            Language = "fr-CA",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("fr-CA-SylvieNeural", "Sylvie", VoiceStyle.Conversational, true),
+                    new("fr-CA-JeanNeural", "Jean", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("fr-CA-AntoineNeural", "Antoine", VoiceStyle.Conversational, true),
+                    new("fr-CA-JeanNeural", "Jean", VoiceStyle.Professional, true)
+                }
             }
         },
 
@@ -400,6 +500,25 @@ public class AzureNeuralVoiceService : IStreamingTTSService
                 [SpeakerGender.Female] = new() { new("ru-RU-Irina", "Irina", VoiceStyle.Standard, false) },
                 [SpeakerGender.Male] = new() { new("ru-RU-Pavel", "Pavel", VoiceStyle.Standard, false) }
             }
+        },
+
+        // Danish (Denmark) - da-DK
+        ["da-DK"] = new VoiceConfiguration
+        {
+            Language = "da-DK",
+            NeuralVoices = new Dictionary<SpeakerGender, List<VoiceOption>>
+            {
+                [SpeakerGender.Female] = new()
+                {
+                    new("da-DK-ChristelNeural", "Christel", VoiceStyle.Conversational, true),
+                    new("da-DK-TineNeural", "Tine", VoiceStyle.Professional, true)
+                },
+                [SpeakerGender.Male] = new()
+                {
+                    new("da-DK-JeppeNeural", "Jeppe", VoiceStyle.Conversational, true),
+                    new("da-DK-MadsNeural", "Mads", VoiceStyle.Professional, true)
+                }
+            }
         }
 
         // Add more languages as needed...
@@ -485,23 +604,28 @@ public class AzureNeuralVoiceService : IStreamingTTSService
 
     private static string NormalizeLanguageCode(string language)
     {
+        if (string.IsNullOrEmpty(language)) return "en-US";
+
         // Handle common variations and normalize to Azure format
         return language.ToLowerInvariant() switch
         {
-            "en" or "english" => "en-US",
-            "ar" or "arabic" => "ar-SA", 
-            "ur" or "urdu" => "ur-IN",
-            "es" or "spanish" => "es-ES",
-            "fr" or "french" => "fr-FR",
-            "de" or "german" => "de-DE",
-            "it" or "italian" => "it-IT",
-            "pt" or "portuguese" => "pt-BR",
-            "zh" or "chinese" => "zh-CN",
-            "ja" or "japanese" => "ja-JP",
-            "ko" or "korean" => "ko-KR",
-            "hi" or "hindi" => "hi-IN",
-            "ru" or "russian" => "ru-RU",
-            _ => language // Return as-is if already in correct format
+            "en" or "english" or "en-us" => "en-US",
+            "en-gb" or "british" => "en-GB",
+            "ar" or "arabic" or "ar-sa" => "ar-SA", 
+            "ur" or "urdu" or "ur-in" => "ur-IN",
+            "ur-pk" => "ur-PK",
+            "es" or "spanish" or "es-es" or "es-mx" => "es-ES",
+            "fr" or "french" or "fr-fr" => "fr-FR",
+            "de" or "german" or "de-de" => "de-DE",
+            "it" or "italian" or "it-it" => "it-IT",
+            "pt" or "portuguese" or "pt-br" => "pt-BR",
+            "zh" or "chinese" or "zh-cn" => "zh-CN",
+            "ja" or "japanese" or "ja-jp" => "ja-JP",
+            "ko" or "korean" or "ko-kr" => "ko-KR",
+            "hi" or "hindi" or "hi-in" => "hi-IN",
+            "ru" or "russian" or "ru-ru" => "ru-RU",
+            "da" or "danish" or "da-dk" => "da-DK",
+            _ => language // Fallback: hope it matches or let fallback logic handle it
         };
     }
 
@@ -542,13 +666,41 @@ public class AzureNeuralVoiceService : IStreamingTTSService
 
     #region TTS Service Implementation
 
-    public async Task SynthesizeAndNotifyAsync(string connectionId, string text, string language, CancellationToken cancellationToken = default)
+    public async Task<string> SynthesizeAndNotifyAsync(
+        string connectionId, 
+        string text, 
+        string language, 
+        string? speakerId = null,
+        string estimatedGender = "Unknown", 
+        bool isPremium = true, 
+        CancellationToken cancellationToken = default)
     {
-        await foreach (var chunk in SynthesizeStreamAsync(text, language, "", cancellationToken))
+        string selectedVoice;
+        
+        // ✅ Use speaker-based voice assignment if speakerId is provided
+        if (!string.IsNullOrEmpty(speakerId))
+        {
+            selectedVoice = _voiceAssignmentService.GetOrAssignVoice(speakerId, language, estimatedGender);
+            _logger.LogDebug("🎤 Using assigned voice {Voice} for speaker {SpeakerId}", selectedVoice, speakerId);
+        }
+        else
+        {
+            // Fallback to legacy gender-based selection
+            var gender = estimatedGender.ToLowerInvariant() switch
+            {
+                "male" => SpeakerGender.Male,
+                "female" => SpeakerGender.Female,
+                _ => SpeakerGender.Unknown
+            };
+            selectedVoice = SelectOptimalVoice(language, gender, isPremium, VoiceStyle.Conversational) ?? "en-US-JennyNeural";
+            _logger.LogDebug("🎤 Using gender-based voice selection: {Voice}", selectedVoice);
+        }
+
+        await foreach (var chunk in SynthesizeStreamAsync(text, language, selectedVoice, cancellationToken))
         {
             await _notificationService.SendTTSAudioSegmentAsync(connectionId, new Application.DTOs.Common.TTSAudioSegment
             {
-                AudioData = Convert.ToBase64String(chunk.AudioData),
+                AudioData = chunk.AudioData,
                 AssociatedText = chunk.AssociatedText,
                 IsFirstChunk = chunk.IsFirstChunk,
                 ChunkIndex = chunk.ChunkIndex,
@@ -556,6 +708,7 @@ public class AzureNeuralVoiceService : IStreamingTTSService
                 ConversationItemId = "neural-tts-" + Guid.NewGuid().ToString()[..8]
             });
         }
+        return selectedVoice;
     }
 
     /// <summary>
@@ -575,12 +728,10 @@ public class AzureNeuralVoiceService : IStreamingTTSService
         // Auto-select voice if not specified
         if (string.IsNullOrEmpty(voiceName))
         {
-            // Default to standard voices for cost optimization - can be overridden for premium users
-            var selectedVoice = SelectOptimalVoice(language, SpeakerGender.Female, isPremium: false);
+            var selectedVoice = SelectOptimalVoice(language, SpeakerGender.Female, isPremium: true);
             if (selectedVoice != null)
             {
                 config.SpeechSynthesisVoiceName = selectedVoice;
-                _logger.LogInformation("🎭 Selected voice: {Voice} for language: {Language} (Premium: false)", selectedVoice, language);
             }
         }
         else
@@ -588,68 +739,61 @@ public class AzureNeuralVoiceService : IStreamingTTSService
             config.SpeechSynthesisVoiceName = voiceName;
         }
 
-        // ✅ Set high-quality output format for neural voices
-        config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3);
+        // 🚀 QUALITY UPGRADE: Use 160kbps for crystal clear neural audio
+        config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3);
 
-        var audioChunks = new List<byte[]>();
-        SpeechSynthesisResult? result = null;
-
-        try
+        using var synthesizer = new SpeechSynthesizer(config, null);
+        
+        // 🚀 TRUE STREAMING: Start synthesis and get the stream immediately
+        using var result = await synthesizer.StartSpeakingTextAsync(text);
+        
+        if (result.Reason == ResultReason.Canceled)
         {
-            using var synthesizer = new SpeechSynthesizer(config, null);
-            
-            _logger.LogDebug("🔊 Starting Azure Neural TTS synthesis for text: {Text}", text.Substring(0, Math.Min(50, text.Length)));
-
-            // ✅ Subscribe to synthesizing events for real-time streaming
-            synthesizer.Synthesizing += (sender, e) =>
-            {
-                if (e.Result.AudioData?.Length > 0)
-                {
-                    var chunk = new byte[e.Result.AudioData.Length];
-                    e.Result.AudioData.CopyTo(chunk, 0);
-                    audioChunks.Add(chunk);
-                    
-                    _logger.LogTrace("🎵 Neural TTS audio chunk received: {Size} bytes", chunk.Length);
-                }
-            };
-
-            result = await synthesizer.SpeakTextAsync(text);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Error during Azure Neural TTS synthesis: {Message}", ex.Message);
+            var cancellation = SpeechSynthesisCancellationDetails.FromResult(result);
+            _logger.LogError("❌ TTS Synthesis Cancelled: {Reason} - {Details}", cancellation.Reason, cancellation.ErrorDetails);
             yield break;
         }
 
-        // Process results
-        if (result?.Reason == ResultReason.SynthesizingAudioCompleted)
-        {
-            _logger.LogInformation("✅ Neural TTS synthesis completed successfully, yielding {Count} chunks", audioChunks.Count);
+        using var stream = AudioDataStream.FromResult(result);
+        
+        byte[] buffer = new byte[8192]; // 8KB chunks for smooth playback
+        int totalBytesRead = 0;
+        int chunkIndex = 0;
 
-            for (int i = 0; i < audioChunks.Count; i++)
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var bytesRead = stream.ReadData(buffer);
+            if (bytesRead == 0) break;
+
+            var chunk = new byte[bytesRead];
+            Array.Copy(buffer, chunk, bytesRead);
+            totalBytesRead += (int)bytesRead;
+
+            yield return new TTSChunk
             {
-                if (cancellationToken.IsCancellationRequested)
-                    yield break;
-
-                yield return new TTSChunk 
-                { 
-                    AudioData = audioChunks[i],
-                    BoundaryType = i == audioChunks.Count - 1 ? "end" : "chunk",
-                    IsFirstChunk = i == 0,
-                    ChunkIndex = i,
-                    TotalChunks = audioChunks.Count,
-                    AssociatedText = text
-                };
-            }
+                AudioData = chunk,
+                IsFirstChunk = chunkIndex == 0,
+                ChunkIndex = chunkIndex++,
+                AssociatedText = text,
+                BoundaryType = "chunk"
+            };
         }
-        else if (result?.Reason == ResultReason.Canceled)
+
+        // Final completion chunk
+        if (!cancellationToken.IsCancellationRequested)
         {
-            var cancellationDetails = SpeechSynthesisCancellationDetails.FromResult(result);
-            _logger.LogError("❌ Neural TTS synthesis cancelled: {Reason}, {ErrorDetails}", 
-                cancellationDetails.Reason, cancellationDetails.ErrorDetails);
+            yield return new TTSChunk
+            {
+                AudioData = Array.Empty<byte>(),
+                IsFirstChunk = false,
+                ChunkIndex = chunkIndex,
+                AssociatedText = text,
+                BoundaryType = "end",
+                TotalChunks = chunkIndex
+            };
         }
 
-        result?.Dispose();
+        _logger.LogDebug("✅ True Streaming completed: {Bytes} bytes in {Chunks} chunks", totalBytesRead, chunkIndex);
     }
 
     /// <summary>
@@ -660,7 +804,7 @@ public class AzureNeuralVoiceService : IStreamingTTSService
         string language,
         SpeakerGender speakerGender,
         VoiceStyle voiceStyle = VoiceStyle.Conversational,
-        bool isPremium = false,
+        bool isPremium = true,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var selectedVoice = SelectOptimalVoice(language, speakerGender, isPremium, voiceStyle);

@@ -7,10 +7,6 @@ namespace A3ITranslator.Application.Services;
 /// </summary>
 public interface ITranslationOrchestrator
 {
-    /// <summary>
-    /// Process translation with conditional AI assistance (Legacy method - for backward compatibility)
-    /// </summary>
-    Task<TranslationResponse> ProcessTranslationAsync(EnhancedTranslationRequest request);
 
     /// <summary>
     /// Process enhanced translation with structured response for maximum performance
@@ -19,7 +15,7 @@ public interface ITranslationOrchestrator
     Task<EnhancedTranslationResponse> ProcessEnhancedTranslationAsync(EnhancedTranslationRequest request);
 
     /// <summary>
-    /// Generate a summary of the conversation based on history
+    /// Generate a native-language summary with AI-generated headings
     /// </summary>
-    Task<string> GenerateConversationSummaryAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage);
+    Task<string> GenerateSummaryInLanguageAsync(string conversationHistory, string language);
 }

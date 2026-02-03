@@ -36,15 +36,20 @@ public class TranslationService : ITranslationService
         UtteranceWithContext utterance, 
         string? lastSpeakerId, 
         string? provisionalSpeakerId, 
-        string? provisionalDisplayName)
+        string? provisionalDisplayName,
+        string turnId,
+        bool isPulse,
+        bool isPremium = true)
     {
         var session = await _sessionRepository.GetByIdAsync(sessionId, CancellationToken.None);
         var recentHistory = new List<ConversationHistoryItem>();
-        var existingFacts = new List<string>();
+        var significantHistory = new List<ConversationHistoryItem>();
+        string? rollingSummary = null;
         
         if (session != null)
         {
-             recentHistory = session.ConversationHistory
+            // Both tracks now get recent history for better context
+            recentHistory = session.ConversationHistory
                 .TakeLast(5)
                 .Select(t => new ConversationHistoryItem 
                 { 
@@ -54,19 +59,25 @@ public class TranslationService : ITranslationService
                 })
                 .ToList();
 
-            existingFacts = session.ConversationHistory
-                .Where(t => t.Metadata.ContainsKey("extractedFacts"))
-                .SelectMany(t => {
-                    var facts = t.Metadata["extractedFacts"];
-                    if (facts is IEnumerable<dynamic> dynList) return dynList;
-                    if (facts is System.Collections.IEnumerable enm) return enm.Cast<object>();
-                    return Enumerable.Empty<object>();
-                })
-                .Cast<object>() // 👈 FORCE NON-DYNAMIC
-                .Select(f => f?.ToString() ?? "")
-                .Where(s => !string.IsNullOrEmpty(s))
-                .Distinct()
-                .ToList();
+            if (isPulse)
+            {
+                if (session.Metadata.TryGetValue("rollingSummary", out var summary))
+                    rollingSummary = summary.ToString();
+            }
+            else
+            {
+                // Only Brain gets the deeper 'Significant History' to save Pulse tokens
+                significantHistory = session.ConversationHistory
+                    .Where(t => t.HasSignificantInfo)
+                    .TakeLast(10)
+                    .Select(t => new ConversationHistoryItem 
+                    { 
+                        SpeakerId = t.SpeakerId, 
+                        SpeakerName = t.SpeakerName, 
+                        Text = t.OriginalText 
+                    })
+                    .ToList();
+            }
         }
 
         var request = new EnhancedTranslationRequest
@@ -74,7 +85,10 @@ public class TranslationService : ITranslationService
             Text = utterance.Text,
             SourceLanguage = utterance.SourceLanguage,
             TargetLanguage = utterance.TargetLanguage,
+            IsPremium = isPremium,
             SessionId = sessionId,
+            TurnId = turnId,
+            IsPulse = isPulse,
             SessionContext = new Dictionary<string, object>
             {
                 ["sessionId"] = sessionId,
@@ -83,9 +97,16 @@ public class TranslationService : ITranslationService
                 ["provisionalName"] = provisionalDisplayName ?? "Unknown",
                 ["expectedLanguageCode"] = utterance.SourceLanguage,
                 ["recentHistory"] = recentHistory,
-                ["existingFacts"] = existingFacts
+                ["significantHistory"] = significantHistory,
+                ["transcriptionConfidence"] = utterance.TranscriptionConfidence,
+                ["speakerConfidence"] = utterance.SpeakerConfidence
             }
         };
+
+        if (rollingSummary != null)
+        {
+            request.SessionContext["summary"] = rollingSummary;
+        }
 
         if (utterance.AudioFingerprint != null)
         {

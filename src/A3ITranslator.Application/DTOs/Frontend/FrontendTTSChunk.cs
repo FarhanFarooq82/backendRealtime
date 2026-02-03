@@ -17,9 +17,9 @@ public class FrontendTTSChunk
     public string ConversationItemId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Base64-encoded audio data
+    /// Raw audio data (previously Base64 string)
     /// </summary>
-    public string AudioData { get; set; } = string.Empty;
+    public byte[] AudioData { get; set; } = Array.Empty<byte>();
 
     /// <summary>
     /// Text that this audio chunk represents

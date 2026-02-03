@@ -31,6 +31,9 @@ public class UsageMetrics
     public long LatencyMs { get; set; }
     public string Status { get; set; } = "Success";
     public string ErrorMessage { get; set; } = string.Empty;
+    public string TurnId { get; set; } = string.Empty;
+    public string Track { get; set; } = string.Empty; // "Pulse" or "Brain"
+    public string VoiceUsed { get; set; } = string.Empty;
 }
 
 public class CycleMetrics

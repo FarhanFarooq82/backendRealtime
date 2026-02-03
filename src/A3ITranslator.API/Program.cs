@@ -30,7 +30,7 @@ builder.Services.AddControllers();
 // Add API Explorer for development
 builder.Services.AddEndpointsApiExplorer();
 
-// SignalR Configuration
+// SignalR Configuration with MessagePack for high-performance binary support
 builder.Services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = true;
@@ -39,6 +39,11 @@ builder.Services.AddSignalR(options =>
     options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.HandshakeTimeout = TimeSpan.FromSeconds(30);
+}).AddMessagePackProtocol(options =>
+{
+    // ✅ Use ContractlessStandardResolver for flexible property name matching
+    options.SerializerOptions = MessagePack.MessagePackSerializerOptions.Standard
+        .WithResolver(MessagePack.Resolvers.ContractlessStandardResolver.Instance);
 });
 
 // Configure Kestrel for both HTTP and HTTPS

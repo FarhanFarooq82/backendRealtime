@@ -1,5 +1,6 @@
 using A3ITranslator.Application.DTOs.Common;
 using A3ITranslator.Application.DTOs.Frontend;
+using A3ITranslator.Application.DTOs.Summary;
 
 namespace A3ITranslator.API.Hubs;
 
@@ -10,7 +11,7 @@ public interface IHubClient
 {
     Task ReceiveTranscription(string text, string language, bool isFinal);
     Task ReceiveError(string message);
-    Task ReceiveAudioChunk(string base64Audio);
+    Task ReceiveAudioChunk(byte[] audioChunk);
     Task ReceiveTranslation(string text, string language, bool isFinal);
     Task ReceiveTransactionComplete();
     
@@ -35,6 +36,6 @@ public interface IHubClient
     Task ReceiveFrontendTTSChunk(FrontendTTSChunk ttsChunk);
     
     // Session management
-    Task ReceiveSessionSummary(string summaryText);
+    Task ReceiveStructuredSummary(SessionSummaryDTO summary);
     Task ReceiveFinalizationSuccess();
 }

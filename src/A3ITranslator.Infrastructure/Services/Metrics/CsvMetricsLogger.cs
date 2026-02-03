@@ -39,7 +39,7 @@ public class CsvMetricsLogger : IMetricsService
             // Initialize Usage Metrics File
             if (!File.Exists(_usageLogPath))
             {
-                var header = "Timestamp,SessionId,ConnectionId,Category,Provider,Operation,Model,InputUnits,InputUnitType,OutputUnits,OutputUnitType,AudioLengthSec,CostUSD,LatencyMs,Status,ErrorMessage";
+                var header = "Timestamp,SessionId,ConnectionId,Category,Provider,Operation,Model,InputUnits,InputUnitType,OutputUnits,OutputUnitType,AudioLengthSec,CostUSD,LatencyMs,Status,ErrorMessage,TurnId,Track,VoiceUsed";
                 File.WriteAllText(_usageLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created usage log at: {_usageLogPath}");
             }
@@ -47,8 +47,8 @@ public class CsvMetricsLogger : IMetricsService
             // Initialize Prompt History File
             if (!File.Exists(_promptLogPath))
             {
-                // ✨ REMOVED SystemPrompt from CSV Header
-                var header = "Timestamp,SessionId,Category,Operation,UserPrompt,Response";
+                // ✨ Added TurnId and Track to Prompt History
+                var header = "Timestamp,SessionId,Category,Operation,UserPrompt,Response,TurnId,Track";
                 File.WriteAllText(_promptLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created prompt history log at: {_promptLogPath}");
             }
@@ -72,7 +72,7 @@ public class CsvMetricsLogger : IMetricsService
         try
         {
             // 1. Append to Usage Metrics (Numbers/Metadata)
-            var usageLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11:F4},{12:F6},{13},{14},{15}",
+            var usageLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11:F4},{12:F6},{13},{14},{15},{16},{17},{18}",
                 metrics.Timestamp,
                 EscapeCsv(metrics.SessionId),
                 EscapeCsv(metrics.ConnectionId),
@@ -88,7 +88,10 @@ public class CsvMetricsLogger : IMetricsService
                 metrics.CostUSD,
                 metrics.LatencyMs,
                 metrics.Status,
-                EscapeCsv(metrics.ErrorMessage));
+                EscapeCsv(metrics.ErrorMessage),
+                EscapeCsv(metrics.TurnId),
+                EscapeCsv(metrics.Track),
+                EscapeCsv(metrics.VoiceUsed));
 
             await File.AppendAllTextAsync(_usageLogPath, usageLine + Environment.NewLine, Encoding.UTF8);
 
@@ -96,13 +99,15 @@ public class CsvMetricsLogger : IMetricsService
             // ✨ REMOVED SystemPrompt from logging
             if (!string.IsNullOrWhiteSpace(metrics.UserPrompt) || !string.IsNullOrWhiteSpace(metrics.Response))
             {
-                var promptLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5}",
+                var promptLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6},{7}",
                     metrics.Timestamp,
                     EscapeCsv(metrics.SessionId),
                     metrics.Category,
                     EscapeCsv(metrics.Operation),
                     EscapeCsv(metrics.UserPrompt),
-                    EscapeCsv(metrics.Response));
+                    EscapeCsv(metrics.Response),
+                    EscapeCsv(metrics.TurnId),
+                    EscapeCsv(metrics.Track));
 
                 await File.AppendAllTextAsync(_promptLogPath, promptLine + Environment.NewLine, Encoding.UTF8);
             }

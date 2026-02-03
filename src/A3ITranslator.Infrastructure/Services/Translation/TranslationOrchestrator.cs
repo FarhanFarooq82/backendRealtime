@@ -58,10 +58,11 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             // 4. Parse the new structured Neural Roster JSON response
             var response = ParseEnhancedGenAIResponse(rawResponse, request);
             
-            // Set processing metadata
             response.ProcessingTimeMs = stopwatch.Elapsed.TotalMilliseconds;
             response.ProviderUsed = _genAIService.GetServiceName();
             response.Usage = genAIResponse.Usage;
+            response.TurnId = request.TurnId;
+            response.IsPulse = request.IsPulse;
 
             // 5. ✨ LOG COMPLETE USER PROMPT (Facts included) & RESPONSE (No System Prompt)
             _ = _metricsService.LogMetricsAsync(new UsageMetrics
@@ -78,7 +79,9 @@ public class TranslationOrchestrator : ITranslationOrchestrator
                 UserPrompt = userPrompt, // Complete prompt including facts/history
                 Response = rawResponse,
                 CostUSD = (genAIResponse.Usage.InputTokens * 0.0000025) + (genAIResponse.Usage.OutputTokens * 0.000010),
-                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds,
+                TurnId = request.TurnId,
+                Track = request.IsPulse ? "Pulse" : "Brain"
             });
 
             _logger.LogInformation("✅ Neural translation completed in {ProcessingTime}ms - Speaker: {SpeakerId}, Action: {Action}",
@@ -100,7 +103,9 @@ public class TranslationOrchestrator : ITranslationOrchestrator
                 ErrorMessage = ex.Message,
                 UserPrompt = userPrompt,
                 Response = rawResponse ?? "EMPTY",
-                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds
+                LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds,
+                TurnId = request.TurnId,
+                Track = request.IsPulse ? "Pulse" : "Brain"
             });
 
             return CreateEnhancedFallbackResponse(request, $"Neural translation failed: {ex.Message}", stopwatch.Elapsed);
@@ -148,20 +153,18 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         };
     }
 
-    public Task<TranslationResponse> ProcessTranslationAsync(EnhancedTranslationRequest request) 
-        => throw new NotSupportedException("Legacy translation is disabled.");
 
-    public async Task<string> GenerateConversationSummaryAsync(string conversationHistory, string primaryLanguage, string secondaryLanguage)
+    public async Task<string> GenerateSummaryInLanguageAsync(string conversationHistory, string language)
     {
         var stopwatch = Stopwatch.StartNew();
-        var (systemPrompt, userPrompt) = await _promptService.BuildSummaryPromptsAsync(conversationHistory, primaryLanguage, secondaryLanguage);
+        var (systemPrompt, userPrompt) = await _promptService.BuildNativeSummaryPromptsAsync(conversationHistory, language);
         var response = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
         
         _ = _metricsService.LogMetricsAsync(new UsageMetrics
         {
             Category = ServiceCategory.Summarization,
             Provider = _genAIService.GetServiceName(),
-            Operation = "ConversationSummary",
+            Operation = "NativeLanguageSummary",
             UserPrompt = userPrompt,
             Response = response.Content,
             LatencyMs = (long)stopwatch.Elapsed.TotalMilliseconds

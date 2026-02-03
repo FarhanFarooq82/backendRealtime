@@ -64,6 +64,7 @@ public static class InfrastructureServiceRegistration
         services.AddHttpClient("OpenAIClient");
 
         // ✅ TTS Services
+        services.AddSingleton<ISpeakerVoiceAssignmentService, AzureSpeakerVoiceAssignmentService>();
         services.AddSingleton<IStreamingTTSService, AzureNeuralVoiceService>();
 
         // ✅ Translation Services
@@ -78,7 +79,6 @@ public static class InfrastructureServiceRegistration
         services.AddSingleton<ISpeakerSyncService, SpeakerSyncService>();
         services.AddSingleton<IConversationLifecycleManager, ConversationLifecycleManager>();
         services.AddSingleton<IConversationResponseService, ConversationResponseService>();
-        services.AddSingleton<IFactService, FactService>();
         services.AddSingleton<ITranslationService, TranslationService>();
 
         // ✅ Conversation Orchestration (Main Pipeline)

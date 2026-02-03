@@ -16,6 +16,7 @@ public interface IConversationResponseService
         EnhancedTranslationResponse translationResponse,
         SpeakerOperationResult speakerUpdate);
 
-    Task SendToTTSAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language);
-    Task SendToTTSContinuousAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language);
+    Task SendPulseAudioOnlyAsync(string connectionId, string sessionId, string? lastSpeakerId, EnhancedTranslationResponse pulseResponse);
+    Task SendToTTSAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language, string estimatedGender = "Unknown", bool isPremium = true);
+    Task SendToTTSContinuousAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language, string estimatedGender = "Unknown", bool isPremium = true);
 }

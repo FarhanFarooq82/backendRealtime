@@ -73,21 +73,27 @@ public class ConversationResponseService : IConversationResponseService
                 await _notificationService.SendFrontendSpeakerListAsync(connectionId, frontendSpeakerUpdate);
             }
 
-            // 🚀 Step 2: Parallel TTS and Conversation Items
+            // 🎭 Step 2: Parallel TTS and Conversation Items
             var tasks = new List<Task>();
             
-            // TTS Logic
-            string ttsText = (translationResponse.AIAssistance.TriggerDetected && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
-                ? translationResponse.AIAssistance.Response ?? string.Empty
-                : translationResponse.Translation ?? string.Empty;
-            
-            string ttsLanguage = (translationResponse.AIAssistance.TriggerDetected && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
-                ? translationResponse.AudioLanguage ?? "en"
-                : translationResponse.TranslationLanguage ?? "en";
+            // TTS Logic: In this new merged mode, Pulse TTS is handled separately.
+            // Brain TTS only happens for AI_ASSISTANCE.
+            bool shouldStreamTTS = !translationResponse.IsPulse && translationResponse.Intent == "AI_ASSISTANCE";
 
-            if (!string.IsNullOrEmpty(ttsText))
+            if (shouldStreamTTS)
             {
-                tasks.Add(SendToTTSContinuousAsync(connectionId, sessionId, activeSpeaker.SpeakerId, ttsText, ttsLanguage));
+                string ttsText = (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+                    ? translationResponse.AIAssistance.Response ?? string.Empty
+                    : translationResponse.Translation ?? string.Empty;
+                
+                string ttsLanguage = (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+                    ? translationResponse.AudioLanguage ?? "en"
+                    : translationResponse.TranslationLanguage ?? "en";
+
+                if (!string.IsNullOrEmpty(ttsText))
+                {
+                    tasks.Add(SendToTTSContinuousAsync(connectionId, sessionId, activeSpeaker.SpeakerId, ttsText, ttsLanguage, translationResponse.EstimatedGender, isPremium: true));
+                }
             }
 
             // Create Conversation Items
@@ -105,28 +111,41 @@ public class ConversationResponseService : IConversationResponseService
                 translationResponse.TranslationLanguage ?? "en",
                 translationResponse.Confidence,
                 activeSpeaker,
-                utterance.SpeakerConfidence
+                utterance.SpeakerConfidence,
+                translationResponse.TurnId,
+                translationResponse.IsPulse,
+                translationResponse.FactExtraction.HasSignificantInfo
             );
 
             tasks.Add(Task.Run(async () =>
             {
                 await _notificationService.SendFrontendConversationItemAsync(connectionId, mainItem);
-                await AddToHistoryAsync(sessionId, mainItem, activeSpeaker.SpeakerId, translationResponse.AudioLanguage ?? "en-US");
+                
+                // 🛑 HISTORY GUARD: Only add to database history for the FINAL (Brain) response
+                if (!translationResponse.IsPulse)
+                {
+                    await AddToHistoryAsync(sessionId, mainItem, activeSpeaker.SpeakerId, translationResponse.AudioLanguage ?? "en-US");
+                }
             }));
 
-            if (translationResponse.AIAssistance.TriggerDetected && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+            if (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
             {
                 var aiItem = _frontendService.CreateFromAIResponse(
                     translationResponse.AudioLanguage ?? "en-US",
                     translationResponse.AIAssistance.Response ?? string.Empty,
                     translationResponse.AIAssistance.ResponseTranslated,
                     translationResponse.TranslationLanguage ?? "en",
-                    1.0f
+                    1.0f,
+                    translationResponse.TurnId + "_ai" // Correlate AI sub-item
                 );
                 tasks.Add(Task.Run(async () =>
                 {
                     await _notificationService.SendFrontendConversationItemAsync(connectionId, aiItem);
-                    await AddToHistoryAsync(sessionId, aiItem, "ai-assistant", translationResponse.AudioLanguage ?? "en-US");
+                    
+                    if (!translationResponse.IsPulse)
+                    {
+                        await AddToHistoryAsync(sessionId, aiItem, "ai-assistant", translationResponse.AudioLanguage ?? "en-US");
+                    }
                 }));
             }
 
@@ -138,11 +157,27 @@ public class ConversationResponseService : IConversationResponseService
         }
     }
 
-    public async Task SendToTTSAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language)
+    public async Task SendPulseAudioOnlyAsync(string connectionId, string sessionId, string? lastSpeakerId, EnhancedTranslationResponse pulseResponse)
     {
         try
         {
-            await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
+            if (pulseResponse.Intent == "SIMPLE_TRANSLATION" && !string.IsNullOrEmpty(pulseResponse.Translation))
+            {
+                _logger.LogDebug("⚡ PULSE TTS: Streaming fast audio for {ConnectionId} with gender {Gender}", connectionId, pulseResponse.EstimatedGender);
+                await SendToTTSContinuousAsync(connectionId, sessionId, lastSpeakerId, pulseResponse.Translation, pulseResponse.TranslationLanguage ?? "en", pulseResponse.EstimatedGender, isPremium: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error in SendPulseAudioOnlyAsync for {ConnectionId}", connectionId);
+        }
+    }
+
+    public async Task SendToTTSAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language, string estimatedGender = "Unknown", bool isPremium = true)
+    {
+        try
+        {
+            await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language, lastSpeakerId, estimatedGender, isPremium);
         }
         catch (Exception ex)
         {
@@ -150,11 +185,15 @@ public class ConversationResponseService : IConversationResponseService
         }
     }
 
-    public async Task SendToTTSContinuousAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language)
+    public async Task SendToTTSContinuousAsync(string connectionId, string sessionId, string? lastSpeakerId, string text, string language, string estimatedGender = "Unknown", bool isPremium = true)
     {
         try
         {
-            await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language);
+            var voiceUsed = await _ttsService.SynthesizeAndNotifyAsync(connectionId, text, language, lastSpeakerId, estimatedGender, isPremium);
+
+            // Cost Calculation: Neural ($16/1M) vs Standard ($4/1M)
+            bool isNeural = voiceUsed.Contains("Neural") || (isPremium && !voiceUsed.Contains("Standard"));
+            double costPerChar = isNeural ? 0.000016 : 0.000004;
 
             _ = _metricsService.LogMetricsAsync(new UsageMetrics
             {
@@ -163,11 +202,13 @@ public class ConversationResponseService : IConversationResponseService
                 Category = ServiceCategory.TTS,
                 Provider = "Azure",
                 Operation = "StreamingTTS",
+                Model = isNeural ? "Neural" : "Standard",
+                VoiceUsed = voiceUsed,
                 OutputUnits = text.Length,
                 OutputUnitType = "Characters",
                 UserPrompt = text,
                 Response = "AUDIO_STREAM",
-                CostUSD = text.Length * 0.000015,
+                CostUSD = text.Length * costPerChar,
                 Status = "Success"
             });
         }

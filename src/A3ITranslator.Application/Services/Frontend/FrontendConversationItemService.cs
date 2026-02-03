@@ -20,7 +20,10 @@ public interface IFrontendConversationItemService
         string targetLanguage,
         float translationConfidence,
         SpeakerProfile speaker,
-        float speakerConfidence);
+        float speakerConfidence,
+        string? id = null,
+        bool isPartial = false,
+        bool hasSignificantInfo = false);
 
     /// <summary>
     /// Create frontend conversation item from AI response
@@ -30,7 +33,8 @@ public interface IFrontendConversationItemService
         string aiResponseText,
         string aiResponseTranslation,
         string responseLanguage,
-        float aiConfidence);
+        float aiConfidence,
+        string? id = null);
 
     /// <summary>
     /// Create frontend speaker list update from domain models
@@ -44,7 +48,7 @@ public interface IFrontendConversationItemService
     /// </summary>
     FrontendTTSChunk CreateTTSChunk(
         string conversationItemId,
-        string audioData,
+        byte[] audioData,
         string text,
         int chunkIndex,
         int totalChunks,
@@ -63,11 +67,14 @@ public class FrontendConversationItemService : IFrontendConversationItemService
         string targetLanguage,
         float translationConfidence,
         SpeakerProfile speaker,
-        float speakerConfidence)
+        float speakerConfidence,
+        string? id = null,
+        bool isPartial = false,
+        bool hasSignificantInfo = false)
     {
         return new FrontendConversationItem
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = id ?? Guid.NewGuid().ToString(),
             Timestamp = DateTime.UtcNow,
             SpeakerName = speaker.DisplayName,
             SpeakerConfidence = speakerConfidence,
@@ -86,11 +93,12 @@ public class FrontendConversationItemService : IFrontendConversationItemService
         string aiResponseText,
         string aiResponseTranslation,
         string responseLanguage,
-        float aiConfidence)
+        float aiConfidence,
+        string? id = null)
     {
         return new FrontendConversationItem
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = id ?? Guid.NewGuid().ToString(),
             Timestamp = DateTime.UtcNow,
             SpeakerName = "Assistant",
             SpeakerConfidence = 1,
@@ -118,7 +126,7 @@ public class FrontendConversationItemService : IFrontendConversationItemService
 
     public FrontendTTSChunk CreateTTSChunk(
         string conversationItemId,
-        string audioData,
+        byte[] audioData,
         string text,
         int chunkIndex,
         int totalChunks,

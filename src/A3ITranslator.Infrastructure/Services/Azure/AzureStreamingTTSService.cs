@@ -24,13 +24,20 @@ public class AzureStreamingTTSService : IStreamingTTSService
         _notificationService = notificationService;
     }
 
-    public async Task SynthesizeAndNotifyAsync(string connectionId, string text, string language, CancellationToken cancellationToken = default)
+    public async Task<string> SynthesizeAndNotifyAsync(
+        string connectionId, 
+        string text, 
+        string language, 
+        string? speakerId = null,
+        string estimatedGender = "Unknown", 
+        bool isPremium = true, 
+        CancellationToken cancellationToken = default)
     {
         await foreach (var chunk in SynthesizeStreamAsync(text, language, "", cancellationToken))
         {
             await _notificationService.SendTTSAudioSegmentAsync(connectionId, new Application.DTOs.Common.TTSAudioSegment
             {
-                AudioData = Convert.ToBase64String(chunk.AudioData),
+                AudioData = chunk.AudioData,
                 AssociatedText = chunk.AssociatedText,
                 IsFirstChunk = chunk.IsFirstChunk,
                 ChunkIndex = chunk.ChunkIndex,
@@ -38,6 +45,7 @@ public class AzureStreamingTTSService : IStreamingTTSService
                 ConversationItemId = "tts-" + Guid.NewGuid().ToString()[..8]
             });
         }
+        return "Azure-Streaming-Standard";
     }
 
     public async IAsyncEnumerable<TTSChunk> SynthesizeStreamAsync(

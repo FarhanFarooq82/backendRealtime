@@ -14,6 +14,9 @@ public class SpeakerProfile
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime LastActive { get; set; } = DateTime.UtcNow;
     
+    // TTS Voice Assignment (persistent across session for consistency)
+    public string? AssignedVoiceName { get; set; }
+    
     // Physical DNA (Acoustic characteristics for identification)
     public AudioFingerprint VoiceFingerprint { get; set; } = new();
     

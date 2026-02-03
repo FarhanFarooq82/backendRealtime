@@ -1,5 +1,6 @@
 using A3ITranslator.Application.DTOs.Common;
 using A3ITranslator.Application.DTOs.Frontend;
+using A3ITranslator.Application.DTOs.Summary;
 using A3ITranslator.Application.Models;
 using A3ITranslator.Application.Models.Speaker;
 
@@ -13,7 +14,7 @@ public interface IRealtimeNotificationService
 {
     Task NotifyTranscriptionAsync(string connectionId, string text, string language, bool isFinal);
     Task NotifyErrorAsync(string connectionId, string message);
-    Task NotifyAudioChunkAsync(string connectionId, string base64Audio);
+    Task NotifyAudioChunkAsync(string connectionId, byte[] audioChunk);
     Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal);
     Task NotifyTransactionCompleteAsync(string connectionId);
 
@@ -59,9 +60,9 @@ public interface IRealtimeNotificationService
     Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk);
 
     /// <summary>
-    /// Send AI generated conversation summary for user review
+    /// Send structured bilingual summary with RTL support and metadata
     /// </summary>
-    Task SendSessionSummaryAsync(string connectionId, string summaryText);
+    Task SendStructuredSummaryAsync(string connectionId, SessionSummaryDTO summary);
 
     /// <summary>
     /// Notify finalization success - signals all emails sent and session can be closed

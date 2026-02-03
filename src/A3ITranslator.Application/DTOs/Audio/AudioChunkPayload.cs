@@ -6,6 +6,6 @@ namespace A3ITranslator.Application.DTOs.Audio;
 /// </summary>
 public class AudioChunkPayload
 {
-    public string AudioData { get; set; } = string.Empty;
+    public byte[] AudioData { get; set; } = Array.Empty<byte>();
     public long Timestamp { get; set; }
 }

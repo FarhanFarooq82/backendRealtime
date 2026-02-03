@@ -7,6 +7,7 @@ namespace A3ITranslator.Application.Domain.Entities;
 /// </summary>
 public class ConversationTurn
 {
+    public int SequenceNumber { get; set; }
     public string TurnId { get; private set; } = Guid.NewGuid().ToString();
     public DateTime Timestamp { get; private set; } = DateTime.UtcNow;
     public string SpeakerId { get; private set; } = string.Empty;
@@ -22,6 +23,7 @@ public class ConversationTurn
     
     public bool IsFinal { get; set; } = true;
     public bool IsTranslated => !string.IsNullOrEmpty(TranslatedText);
+    public bool HasSignificantInfo { get; set; }
 
     private ConversationTurn() { }
 
