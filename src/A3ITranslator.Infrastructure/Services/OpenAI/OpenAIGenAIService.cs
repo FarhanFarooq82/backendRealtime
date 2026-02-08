@@ -43,7 +43,7 @@ public class OpenAIGenAIService : IGenAIService
         }
     }
 
-    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt)
+    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false)
     {
         try
         {

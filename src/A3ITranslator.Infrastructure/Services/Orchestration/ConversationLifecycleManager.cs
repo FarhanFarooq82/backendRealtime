@@ -94,26 +94,16 @@ public class ConversationLifecycleManager : IConversationLifecycleManager
             await Task.WhenAll(primaryTask, secondaryTask);
 
             // Create structured DTO with RTL support
+            // Create structured DTO with RTL support
             var summaryDTO = new SessionSummaryDTO
             {
-                Primary = new SummarySection
-                {
-                    Language = session.PrimaryLanguage,
-                    LanguageName = LanguageConfigurationService.GetLanguageDisplayName(session.PrimaryLanguage),
-                    IsRTL = LanguageConfigurationService.IsRightToLeft(session.PrimaryLanguage),
-                    Content = primaryTask.Result
-                },
-                Secondary = new SummarySection
-                {
-                    Language = session.SecondaryLanguage ?? "en-US",
-                    LanguageName = LanguageConfigurationService.GetLanguageDisplayName(session.SecondaryLanguage ?? "en-US"),
-                    IsRTL = LanguageConfigurationService.IsRightToLeft(session.SecondaryLanguage ?? "en-US"),
-                    Content = secondaryTask.Result
-                },
+                Primary = ParseSummaryResponse(primaryTask.Result, session.PrimaryLanguage),
+                Secondary = ParseSummaryResponse(secondaryTask.Result, session.SecondaryLanguage ?? "en-US"),
                 GeneratedAt = DateTime.UtcNow,
                 TotalTurns = session.ConversationHistory.Count,
                 MeetingDuration = DateTime.UtcNow - session.StartTime
             };
+
 
             await _notificationService.SendStructuredSummaryAsync(connectionId, summaryDTO);
             _logger.LogInformation("✅ Bilingual summary sent to {ConnectionId} ({TotalTurns} turns)", 
@@ -147,6 +137,109 @@ public class ConversationLifecycleManager : IConversationLifecycleManager
         }
         
         return context.ToString();
+    }
+
+    private SummarySection ParseSummaryResponse(string rawText, string language)
+    {
+        var section = new SummarySection
+        {
+            Language = language,
+            LanguageName = LanguageConfigurationService.GetLanguageDisplayName(language),
+            IsRTL = LanguageConfigurationService.IsRightToLeft(language)
+        };
+
+        try 
+        {
+            var lines = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                              .Select(l => l.Trim())
+                              .Where(l => !string.IsNullOrWhiteSpace(l))
+                              .ToList();
+
+            // 1. Extract Labels
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("LabelDate:", StringComparison.OrdinalIgnoreCase)) section.LabelDate = line.Substring("LabelDate:".Length).Trim();
+                else if (line.StartsWith("LabelLocation:", StringComparison.OrdinalIgnoreCase)) section.LabelLocation = line.Substring("LabelLocation:".Length).Trim();
+                else if (line.StartsWith("LabelTitle:", StringComparison.OrdinalIgnoreCase)) section.LabelTitle = line.Substring("LabelTitle:".Length).Trim();
+                else if (line.StartsWith("LabelObjective:", StringComparison.OrdinalIgnoreCase)) section.LabelObjective = line.Substring("LabelObjective:".Length).Trim();
+                else if (line.StartsWith("LabelParticipants:", StringComparison.OrdinalIgnoreCase)) section.LabelParticipants = line.Substring("LabelParticipants:".Length).Trim();
+                else if (line.StartsWith("LabelKeyDiscussionPoints:", StringComparison.OrdinalIgnoreCase)) section.LabelKeyDiscussionPoints = line.Substring("LabelKeyDiscussionPoints:".Length).Trim();
+                else if (line.StartsWith("LabelActionItems:", StringComparison.OrdinalIgnoreCase)) section.LabelActionItems = line.Substring("LabelActionItems:".Length).Trim();
+            }
+            
+            // 2. Extract Data
+            int currentSection = 0; // 0=None, 1=Participants, 2=KeyPoints, 3=Actions
+            
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("Label")) continue;
+
+                // Check for single-line fields
+                if (!string.IsNullOrEmpty(section.LabelDate) && line.StartsWith(section.LabelDate, StringComparison.OrdinalIgnoreCase)) 
+                {
+                    section.Date = ExtractValue(line, section.LabelDate);
+                    currentSection = 0;
+                }
+                else if (!string.IsNullOrEmpty(section.LabelLocation) && line.StartsWith(section.LabelLocation, StringComparison.OrdinalIgnoreCase))
+                {
+                    section.Location = ExtractValue(line, section.LabelLocation);
+                    currentSection = 0;
+                }
+                else if (!string.IsNullOrEmpty(section.LabelTitle) && line.StartsWith(section.LabelTitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    section.Title = ExtractValue(line, section.LabelTitle);
+                    currentSection = 0;
+                }
+                else if (!string.IsNullOrEmpty(section.LabelObjective) && line.StartsWith(section.LabelObjective, StringComparison.OrdinalIgnoreCase))
+                {
+                    section.Objective = ExtractValue(line, section.LabelObjective);
+                    currentSection = 0;
+                }
+                
+                // Check for list section headers
+                else if (!string.IsNullOrEmpty(section.LabelParticipants) && line.Contains(section.LabelParticipants, StringComparison.OrdinalIgnoreCase))
+                {
+                    currentSection = 1;
+                }
+                else if (!string.IsNullOrEmpty(section.LabelKeyDiscussionPoints) && line.Contains(section.LabelKeyDiscussionPoints, StringComparison.OrdinalIgnoreCase))
+                {
+                    currentSection = 2;
+                }
+                else if (!string.IsNullOrEmpty(section.LabelActionItems) && line.Contains(section.LabelActionItems, StringComparison.OrdinalIgnoreCase))
+                {
+                    currentSection = 3;
+                }
+                
+                // List items
+                else if (line.StartsWith("-") || line.StartsWith("*"))
+                {
+                    var item = line.TrimStart('-', '*', ' ').Trim();
+                    if (currentSection == 1) section.Participants.Add(item);
+                    else if (currentSection == 2) section.KeyDiscussionPoints.Add(item);
+                    else if (currentSection == 3) section.ActionItems.Add(item);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing structured summary for {Lang}", language);
+            section.Title = "Summary Parser Error";
+            section.Objective = rawText; 
+        }
+
+        return section;
+    }
+
+    private string ExtractValue(string line, string label)
+    {
+        var combined = label + ":";
+        if (line.StartsWith(combined, StringComparison.OrdinalIgnoreCase))
+            return line.Substring(combined.Length).Trim();
+            
+        if (line.StartsWith(label, StringComparison.OrdinalIgnoreCase))
+             return line.Substring(label.Length).Trim();
+             
+        return line;
     }
 
     public async Task FinalizeAndMailAsync(string connectionId, List<string> emailAddresses)

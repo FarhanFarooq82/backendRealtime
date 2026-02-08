@@ -16,6 +16,14 @@ public class GenAIResponse
     public string Content { get; set; } = string.Empty;
     public GenAIUsage Usage { get; set; } = new();
     public string Model { get; set; } = string.Empty;
+    public GroundingInfo? GroundingInfo { get; set; }
+}
+
+public class GroundingInfo
+{
+    public string? SearchEntryPoint { get; set; }
+    public List<string>? GroundingChunks { get; set; }
+    public List<string>? WebSearchQueries { get; set; }
 }
 
 /// <summary>
@@ -32,7 +40,7 @@ public interface IGenAIService
     /// <summary>
     /// Generate response from system and user prompts
     /// </summary>
-    Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt);
+    Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false);
     
     /// <summary>
     /// Stream response tokens from system and user prompts

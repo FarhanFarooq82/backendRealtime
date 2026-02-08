@@ -528,6 +528,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
             var utteranceWithContext = state.GetCompleteUtterance();
 
             // 1. START PARALLEL TRACKS
+            // 1. START PARALLEL TRACKS
             // Track A: Pulse (Fast Translation)
             var pulseTask = _translationService.ProcessTranslationAsync(
                 state.SessionId!, 
@@ -548,25 +549,25 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 turnId,
                 false); // IsPulse = false
 
-                state.GenAIStartTime = DateTime.UtcNow;
+            state.GenAIStartTime = DateTime.UtcNow;
 
-                // 2. AWAIT PULSE (Immediate Audio delivery)
-                var pulseResponse = await pulseTask;
-                state.GenAIEndTime = DateTime.UtcNow;
+            // 2. AWAIT PULSE (Immediate Audio delivery)
+            var pulseResponse = await pulseTask;
+            state.GenAIEndTime = DateTime.UtcNow;
 
-                _logger.LogInformation("⚡ {TurnId}: Pulse track ready. Streaming audio...", turnId);
+            _logger.LogInformation("⚡ {TurnId}: Pulse track ready. Streaming audio...", turnId);
 
-                // FIRE PULSE AUDIO IMMEDIATELY (Zero-latency speech)
-                _ = _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.LastSpeakerId, pulseResponse);
+            // FIRE PULSE AUDIO IMMEDIATELY (Zero-latency speech)
+            _ = _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.LastSpeakerId, pulseResponse);
 
-                // If Pulse already knows it's an AI task, show "Thinking..." status
-                if (pulseResponse.Intent == "AI_ASSISTANCE")
-                {
-                    await _notificationService.NotifyProcessingStatusAsync(connectionId, "🤖 Assistant is thinking...");
-                }
+            // If Pulse already knows it's an AI task, show "Thinking..." status
+            if (pulseResponse.Intent == "AI_ASSISTANCE")
+            {
+                await _notificationService.NotifyProcessingStatusAsync(connectionId, "🤖 Assistant is thinking...");
+            }
 
-                // 3. AWAIT BRAIN (Contextual refinement)
-                var brainResponse = await brainTask;
+            // 3. AWAIT BRAIN (Contextual refinement)
+            var brainResponse = await brainTask;
                 _logger.LogInformation("🧠 {TurnId}: Brain enrichment completed. Merging...", turnId);
 
                 // 4. MERGE RESULTS (Convergance)

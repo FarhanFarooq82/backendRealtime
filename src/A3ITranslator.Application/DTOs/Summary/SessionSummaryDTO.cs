@@ -34,8 +34,21 @@ public class SummarySection
     /// </summary>
     public bool IsRTL { get; set; }
     
-    /// <summary>
-    /// Full markdown summary with AI-generated native headings
-    /// </summary>
-    public string Content { get; set; } = string.Empty;
+    // Labels (Native Language)
+    public string LabelDate { get; set; } = string.Empty;
+    public string LabelLocation { get; set; } = string.Empty;
+    public string LabelTitle { get; set; } = string.Empty;
+    public string LabelObjective { get; set; } = string.Empty;
+    public string LabelParticipants { get; set; } = string.Empty;
+    public string LabelKeyDiscussionPoints { get; set; } = string.Empty;
+    public string LabelActionItems { get; set; } = string.Empty;
+
+    // Content Data
+    public string Date { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public List<string> Participants { get; set; } = new();
+    public List<string> KeyDiscussionPoints { get; set; } = new();
+    public List<string> ActionItems { get; set; } = new();
 }

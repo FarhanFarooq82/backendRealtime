@@ -46,7 +46,8 @@ public class TranslationOrchestrator : ITranslationOrchestrator
             // 2. Clear target context if needed (handled in PromptService)
             
             // 3. Get response from GenAI service
-            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt);
+            // 🧠 Use Grounding (Search) only for "Brain" track. It handles the intent to use it or not.
+            var genAIResponse = await _genAIService.GenerateResponseAsync(systemPrompt, userPrompt, useGrounding: !request.IsPulse);
             rawResponse = genAIResponse.Content;
 
             if (string.IsNullOrWhiteSpace(rawResponse))

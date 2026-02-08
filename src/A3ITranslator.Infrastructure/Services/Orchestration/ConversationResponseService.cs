@@ -82,17 +82,29 @@ public class ConversationResponseService : IConversationResponseService
 
             if (shouldStreamTTS)
             {
-                string ttsText = (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+                // User Request: "ai responce should take the ai responce not translated text for tts and the voice could be default and the languge should be audiolanguage"
+                // Logic:
+                // If Intent == AI_ASSISTANCE:
+                //   - TTS Text = translationResponse.AIAssistance.Response (The answer in source lang)
+                //   - TTS Lang = translationResponse.AudioLanguage (Source lang)
+                // Else (Translation):
+                //   - TTS Text = translationResponse.Translation
+                //   - TTS Lang = translationResponse.TranslationLanguage
+                string ttsText = (translationResponse.Intent == "AI_ASSISTANCE")
                     ? translationResponse.AIAssistance.Response ?? string.Empty
                     : translationResponse.Translation ?? string.Empty;
                 
-                string ttsLanguage = (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
-                    ? translationResponse.AudioLanguage ?? "en"
+                string ttsLanguage = (translationResponse.Intent == "AI_ASSISTANCE")
+                    ? translationResponse.AudioLanguage ?? "en" 
                     : translationResponse.TranslationLanguage ?? "en";
 
                 if (!string.IsNullOrEmpty(ttsText))
                 {
-                    tasks.Add(SendToTTSContinuousAsync(connectionId, sessionId, activeSpeaker.SpeakerId, ttsText, ttsLanguage, translationResponse.EstimatedGender, isPremium: true));
+                    // For AI_ASSISTANCE, use "System" or null so we don't mimic the user's voice.
+                    // This ensures the voice is selected based purely on language and gender (defaulting to Female Assistant).
+                    string? ttsSpeakerId = (translationResponse.Intent == "AI_ASSISTANCE") ? null : activeSpeaker.SpeakerId;
+                    
+                    tasks.Add(SendToTTSContinuousAsync(connectionId, sessionId, ttsSpeakerId, ttsText, ttsLanguage, translationResponse.EstimatedGender, isPremium: true));
                 }
             }
 

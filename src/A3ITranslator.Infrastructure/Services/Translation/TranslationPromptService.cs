@@ -95,8 +95,14 @@ You will receive a user message containing:
 
 3. 🧠 **INTENT & AI ASSISTANCE**:
    - **Intent**: 'SIMPLE_TRANSLATION' (Default) vs 'AI_ASSISTANCE' (User asks YOU for help).
-   - **Trigger**: Only specific calls like ""Assistant, what did he say?"" or ""Translator, clarify that.""
-   - **Action**: If triggered, provide a concise, helpful response in `aiAssistance` in the audio language and translated response in the target language.
+   - **Trigger**: Only specific calls like ""Assistant, who is...?"", ""Translator, what is...?"", or ""Fact check this...""
+   - **Action**: 
+     - If triggered, you may use **Google Search Grounding** to find real-time info (e.g., current CEOs, weather, news, events, time).
+     - **PERSONALIZATION**: Look at the **PROVISIONAL MATCH** in the Neural Evidence section.
+       - If a name is provided (e.g., ""Farhan"", ""John"") and it is NOT Unknown, you MUST start your response by addressing them (e.g., ""Hello Farhan, ..."").
+       - If the name is Unknown or no match exists, reply DIRECTLY to the query without any greeting.
+     - Provide a concise, helpful response in `aiAssistance` in the audio language and translated response in the target language.
+     - **DO NOT** use search for simple translations or pleasantries. Only for factual questions.
 
 4. 📝 **SIGNIFICANT INFO DETECTION**:
    - **Goal**: Identify if this utterance contains high-value information.
@@ -299,41 +305,46 @@ You will receive a user message containing:
         var systemPrompt = $@"You are an expert meeting summarizer.
 Generate a professional summary **entirely in {langName}** ({language}).
 
-**CRITICAL REQUIREMENTS:**
-1. **ALL content must be in {langName}** - headings, labels, and body text
-2. **Use native terminology** - Choose culturally appropriate section names for:
-   - Date/Time information
-   - Meeting location
-   - Meeting title
-   - Purpose/Objective
-   - List of participants
-   - Key discussion points
-   - Conclusions and action items
+**CRITICAL FORMATTING REQUIREMENTS:**
+1. **NO MARKDOWN IN KEYS**: Do NOT use asterisks (*) or brackets ([]) for the section headers. Reference the example below exactly.
+2. **Structure**: Use clear key-value pairs where the key is the section name in {langName}.
+3. **Content**: All values must be in {langName}.
 
-{(isRTL ? "3. **This is a RIGHT-TO-LEFT language** - Ensure proper RTL text flow" : "")}
+{(isRTL ? "4. **RIGHT-TO-LEFT**: Ensure proper RTL flow for this language." : "")}
 
-**FORMAT:**
-Use clear markdown structure with:
-- Bold headings for each section (using native language terms)
-- Bullet points for lists
-- Professional, concise language
+**REQUIRED OUTPUT FORMAT (Translate keys to {langName}):**
+LabelDate:session start date time
+LabelLocation:Location label in {langName}
+LabelTitle:Title label in {langName}
+LabelObjective:Objective label in {langName}
+LabelParticipants:Participants label in {langName}
+LabelKeyDiscussionPoints:KeyDiscussionPoints label in {langName}
+LabelActionItems:ActionItems label in {langName}
 
-**EXAMPLE STRUCTURE (translate section names to {langName}):**
-**[Date label in {langName}]**: ...
-**[Meeting Place label in {langName}]**: ...
-**[Meeting Title label in {langName}]**: ...
-**[Purpose label in {langName}]**: ...
-**[Participants label in {langName}]**: ...
-**[Key Points label in {langName}]**: ...
-**[Actions label in {langName}]**: ...
+Date: [Date content]
+Location: [Location content]
+Title: [Title content]
+Objective: [Objective content]
 
-OUTPUT: Provide ONLY the formatted summary in {langName}.";
+Participants:
+- [Name 1]
+- [Name 2]
+
+Key Discussion Points:
+- [Point 1]
+- [Point 2]
+
+Action Items:
+- [Action 1]
+- [Action 2]
+
+**DO NOT** add bounding boxes, citation markers, or markdown bolding to the section labels (e.g. write 'Date:', NOT '**Date**:').";
 
         var userPrompt = $@"### CONVERSATION HISTORY:
 {conversationHistory}
 
 ### TASK:
-Generate a complete meeting summary in {langName} ({language}) with ALL headings and content in the native language.";
+Generate the meeting summary in {langName} following the strict format above. Ensure no asterisks are used in the section headers. make it maximum 2 page summary but try to keep it shourt but proportional to siginficant discussion in conneection of the goal of the meeting ";
 
         return Task.FromResult((systemPrompt, userPrompt));
     }

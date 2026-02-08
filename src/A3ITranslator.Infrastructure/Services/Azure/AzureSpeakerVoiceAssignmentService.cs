@@ -51,10 +51,13 @@ public class AzureSpeakerVoiceAssignmentService : ISpeakerVoiceAssignmentService
         string? gender = null,
         Dictionary<string, string>? existingSpeakerVoices = null)
     {
-        // Return existing assignment if already mapped
-        if (_speakerToVoiceMap.TryGetValue(speakerId, out var existingVoice))
+        // Build composite key for speaker + language to ensure appropriate voice per language
+        var assignmentKey = $"{speakerId}:{targetLanguage}";
+
+        // Return existing assignment if already mapped for this specific language
+        if (_speakerToVoiceMap.TryGetValue(assignmentKey, out var existingVoice))
         {
-            _logger.LogDebug("🎤 Speaker {SpeakerId} already assigned voice: {Voice}", speakerId, existingVoice);
+            _logger.LogDebug("🎤 Speaker {SpeakerId} already assigned voice for {Language}: {Voice}", speakerId, targetLanguage, existingVoice);
             return existingVoice;
         }
 
@@ -75,9 +78,10 @@ public class AzureSpeakerVoiceAssignmentService : ISpeakerVoiceAssignmentService
             }
         }
 
-        // Get voices already assigned to OTHER speakers (to avoid duplicates)
+        // Get voices already assigned to OTHER speakers for THIS language (to avoid duplicates locally)
+        // We can check against the language map
         var usedVoices = (existingSpeakerVoices ?? _speakerToVoiceMap)
-            .Where(kvp => kvp.Key != speakerId)
+            .Where(kvp => kvp.Key.StartsWith($"{speakerId}:") == false && kvp.Key.EndsWith($":{targetLanguage}"))
             .Select(kvp => kvp.Value)
             .ToHashSet();
 
@@ -91,11 +95,11 @@ public class AzureSpeakerVoiceAssignmentService : ISpeakerVoiceAssignmentService
             _logger.LogInformation("🔄 All voices in use for {PoolKey}, reusing: {Voice}", poolKey, selectedVoice);
         }
 
-        // Store the assignment
-        _speakerToVoiceMap[speakerId] = selectedVoice;
+        // Store the assignment with Language context
+        _speakerToVoiceMap[assignmentKey] = selectedVoice;
         
-        _logger.LogInformation("✅ Assigned voice {Voice} to speaker {SpeakerId} (Gender: {Gender}, Language: {Language})", 
-            selectedVoice, speakerId, normalizedGender, targetLanguage);
+        _logger.LogInformation("✅ Assigned voice {Voice} to {SpeakerId} for {Language} (Gender: {Gender})", 
+            selectedVoice, speakerId, targetLanguage, normalizedGender);
 
         return selectedVoice;
     }
@@ -107,9 +111,19 @@ public class AzureSpeakerVoiceAssignmentService : ISpeakerVoiceAssignmentService
 
     public void ClearAssignment(string speakerId)
     {
-        if (_speakerToVoiceMap.Remove(speakerId))
+        // Find all keys starting with this speakerId
+        var keysToRemove = _speakerToVoiceMap.Keys
+            .Where(k => k.StartsWith($"{speakerId}:"))
+            .ToList();
+
+        foreach (var key in keysToRemove)
         {
-            _logger.LogDebug("🧹 Cleared voice assignment for speaker {SpeakerId}", speakerId);
+            _speakerToVoiceMap.Remove(key);
+        }
+        
+        if (keysToRemove.Any())
+        {
+            _logger.LogDebug("🧹 Cleared {Count} voice assignments for speaker {SpeakerId}", keysToRemove.Count, speakerId);
         }
     }
 

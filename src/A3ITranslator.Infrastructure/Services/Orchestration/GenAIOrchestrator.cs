@@ -46,7 +46,7 @@ public class GenAIOrchestrator : IGenAIService
         return false;
     }
 
-    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt)
+    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false)
     {
         var providerPriority = (_options.GenAIProviderPriority ?? new[] { "Gemini", "Azure", "OpenAI" }).Distinct();
         var attempts = new List<(string Provider, string Error)>();
@@ -69,7 +69,7 @@ public class GenAIOrchestrator : IGenAIService
             {
                 _logger.LogInformation("🚀 Attempting GenAI request with: {Provider}", provider.GetServiceName());
                 
-                var response = await provider.GenerateResponseAsync(systemPrompt, userPrompt);
+                var response = await provider.GenerateResponseAsync(systemPrompt, userPrompt, useGrounding);
                 
                 if (!string.IsNullOrEmpty(response.Content))
                 {

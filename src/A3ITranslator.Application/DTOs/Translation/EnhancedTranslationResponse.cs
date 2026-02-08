@@ -39,6 +39,20 @@ public class EnhancedTranslationResponse
     // Pulse/Brain Correlation
     public string TurnId { get; set; } = string.Empty;
     public bool IsPulse { get; set; }
+    // Citations (Grounding)
+    public CitationData? Citations { get; set; }
+}
+
+public class CitationData
+{
+    public string? SearchEntryPoint { get; set; }
+    public List<CitationSource> Sources { get; set; } = new();
+}
+
+public class CitationSource
+{
+    public string Title { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
 }
 
 public class TurnAnalysisData

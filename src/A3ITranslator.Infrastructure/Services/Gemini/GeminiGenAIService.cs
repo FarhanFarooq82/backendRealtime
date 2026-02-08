@@ -43,7 +43,7 @@ public class GeminiGenAIService : IGenAIService
         }
     }
 
-    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt)
+    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false)
     {
         try
         {
@@ -61,7 +61,6 @@ public class GeminiGenAIService : IGenAIService
 
             _logger.LogDebug("Making Gemini API request to model: {Model}", _options.Gemini.Model);
 
-            // Official Gemini 1.5/2.0 request structure
             var requestBody = new
             {
                 contents = new[]
@@ -76,12 +75,16 @@ public class GeminiGenAIService : IGenAIService
                 {
                     parts = new[] { new { text = systemPrompt } }
                 },
+                tools = useGrounding ? new object[] 
+                { 
+                    new { googleSearch = new { } }
+                } : null,
                 generationConfig = new
                 {
                     temperature = 0.3,
                     topP = 0.9,
                     maxOutputTokens = 2048,
-                    responseMimeType = "application/json" // Request JSON response
+                    responseMimeType = useGrounding ? null : "application/json"
                 }
             };
 
@@ -115,6 +118,14 @@ public class GeminiGenAIService : IGenAIService
                     _logger.LogDebug("Gemini response received, length: {Length}, Usage: In={InputTokens}, Out={OutputTokens}", 
                         textContent.Length, inputTokens, outputTokens);
 
+                    var groundingInfo = candidate.GroundingMetadata != null ? new GroundingInfo
+                    {
+                        SearchEntryPoint = candidate.GroundingMetadata.SearchEntryPoint?.RenderedContent,
+                        WebSearchQueries = candidate.GroundingMetadata.WebSearchQueries,
+                        // Simplification for mapped object
+                        GroundingChunks = candidate.GroundingMetadata.GroundingChunks?.Select(c => c.Web?.Title ?? "Source").ToList()
+                    } : null;
+
                     return new GenAIResponse
                     {
                         Content = textContent,
@@ -123,7 +134,8 @@ public class GeminiGenAIService : IGenAIService
                         {
                             InputTokens = inputTokens,
                             OutputTokens = outputTokens
-                        }
+                        },
+                        GroundingInfo = groundingInfo
                     };
                 }
                 else
@@ -245,6 +257,30 @@ public class GeminiGenAIService : IGenAIService
     {
         public Content? Content { get; set; }
         public string? FinishReason { get; set; }
+        public GroundingMetadata? GroundingMetadata { get; set; }
+    }
+
+    private class GroundingMetadata
+    {
+        public SearchEntryPoint? SearchEntryPoint { get; set; }
+        public List<string>? WebSearchQueries { get; set; }
+        public List<GroundingChunk>? GroundingChunks { get; set; }
+    }
+
+    private class SearchEntryPoint
+    {
+        public string? RenderedContent { get; set; }
+    }
+
+    private class GroundingChunk
+    {
+        public WebSource? Web { get; set; }
+    }
+
+    private class WebSource
+    {
+        public string? Uri { get; set; }
+        public string? Title { get; set; }
     }
 
     private class Content
