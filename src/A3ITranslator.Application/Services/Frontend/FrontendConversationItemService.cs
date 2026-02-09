@@ -22,8 +22,7 @@ public interface IFrontendConversationItemService
         SpeakerProfile speaker,
         float speakerConfidence,
         string? id = null,
-        bool isPartial = false,
-        bool hasSignificantInfo = false);
+        bool isPartial = false);
 
     /// <summary>
     /// Create frontend conversation item from AI response
@@ -69,8 +68,7 @@ public class FrontendConversationItemService : IFrontendConversationItemService
         SpeakerProfile speaker,
         float speakerConfidence,
         string? id = null,
-        bool isPartial = false,
-        bool hasSignificantInfo = false)
+        bool isPartial = false)
     {
         return new FrontendConversationItem
         {

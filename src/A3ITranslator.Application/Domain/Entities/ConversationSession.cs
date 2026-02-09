@@ -25,6 +25,31 @@ public class ConversationSession
     public IReadOnlyCollection<SpeakerProfile> Speakers => _speakers.AsReadOnly();
     public string? CurrentSpeakerId { get; set; }
 
+    // Fact Management
+    private readonly Dictionary<string, Fact> _facts = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyCollection<Fact> Facts 
+    {
+        get { lock(_lock) return _facts.Values.ToList(); }
+    }
+    
+    public void UpdateFact(Fact fact)
+    {
+        lock(_lock)
+        {
+            _facts[fact.Key] = fact;
+            UpdateActivity();
+        }
+    }
+    
+    public void DeleteFact(string key)
+    {
+        lock(_lock)
+        {
+            if (_facts.Remove(key))
+                UpdateActivity();
+        }
+    }
+
     // Conversation History
     private readonly List<ConversationTurn> _conversationHistory = new();
     public IReadOnlyList<ConversationTurn> ConversationHistory 

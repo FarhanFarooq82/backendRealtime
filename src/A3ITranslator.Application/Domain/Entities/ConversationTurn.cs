@@ -23,7 +23,7 @@ public class ConversationTurn
     
     public bool IsFinal { get; set; } = true;
     public bool IsTranslated => !string.IsNullOrEmpty(TranslatedText);
-    public bool HasSignificantInfo { get; set; }
+
 
     private ConversationTurn() { }
 

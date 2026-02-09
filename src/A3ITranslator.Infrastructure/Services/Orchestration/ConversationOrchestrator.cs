@@ -17,6 +17,7 @@ using System.Linq;
 using System.Collections.Concurrent;
 using A3ITranslator.Application.Models;
 using A3ITranslator.Infrastructure.Services.Translation; // ✅ For ConversationHistoryItem
+using System.Diagnostics;
 
 // ✅ PURE DOMAIN: Type aliases for clean architecture
 using DomainSession = A3ITranslator.Application.Domain.Entities.ConversationSession;
@@ -337,6 +338,12 @@ public class ConversationOrchestrator : IConversationOrchestrator
             // 🏆 ADOPT WINNER
             _logger.LogInformation("🏆 Competition winner: {Language} with confidence {Confidence:F2}", 
                 competitionResult.WinnerLanguage, competitionResult.Confidence);
+
+            if (!string.IsNullOrEmpty(competitionResult.LoserBestText))
+            {
+                _logger.LogInformation("💀 Competition loser: {Language} with confidence {Confidence:F2}. Text: '{Text}'",
+                    competitionResult.LoserLanguage, competitionResult.LoserConfidence, competitionResult.LoserBestText);
+            }
             
             state.ProcessingLanguage = competitionResult.WinnerLanguage;
             // The state.AddTranscriptionResult already happened during monitoring for winner if it was selected early, 
@@ -578,6 +585,21 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     brainResponse.TranslationLanguage = pulseResponse.TranslationLanguage;
                 }
 
+                // 🚨 CONFLICT RESOLUTION: If Pulse thought it was AI, but Brain (deeper analysis) says it's just Translation,
+                // we must respect Brain and ensure we don't accidentally treat it as an AI response.
+                if (pulseResponse.Intent == "AI_ASSISTANCE" && brainResponse.Intent == "SIMPLE_TRANSLATION")
+                {
+                    _logger.LogInformation("🔄 Intent Correction: Pulse thought AI_ASSISTANCE, but Brain corrected to SIMPLE_TRANSLATION. Sending Translation.");
+                    // Force intent to Translation so ResponseService uses TTS correctly
+                    brainResponse.Intent = "SIMPLE_TRANSLATION"; 
+                    // Ensure we have a translation (fallback to Pulse if Brain didn't provide one because it was confused)
+                    if (string.IsNullOrEmpty(brainResponse.Translation))
+                    {
+                         brainResponse.Translation = pulseResponse.Translation;
+                         brainResponse.TranslationLanguage = pulseResponse.TranslationLanguage;
+                    }
+                }
+
                 // 5. SPEAKER IDENTIFICATION & STATE UPDATE
                 var speakerResult = await SyncSpeakerAndFactsAsync(state, brainResponse, utteranceWithContext);
                 state.LastSpeakerId = speakerResult.SpeakerId;
@@ -657,6 +679,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 GenAIStartTime = state.GenAIStartTime,
                 GenAIEndTime = state.GenAIEndTime,
                 CycleEndTime = state.ResponseSentTime,
+                ConversationItemSentTime = state.ResponseSentTime,
                 AudioDurationSec = state.AccumulatedAudioSec,
                 STTCost = sttCost,
                 GenAICost = genAICost,
@@ -721,6 +744,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
 /// Manages transcription results, interim text, and utterance completion state
 /// Centralizes all utterance-related logic for better separation of concerns
 /// </summary>
+[DebuggerDisplay("Completed={IsUtteranceCompleted}, Text={GetAccumulatedText()}")]
 public class UtteranceManager
 {
     public List<string> FinalUtterances { get; } = new();
@@ -887,6 +911,7 @@ public class UtteranceManager
     
 
 
+[DebuggerDisplay("State={CycleState}, Lang={ProcessingLanguage}, Text={GetCurrentDisplayText()}")]
 public class ConversationState : IDisposable
 {
     public string ConnectionId { get; }

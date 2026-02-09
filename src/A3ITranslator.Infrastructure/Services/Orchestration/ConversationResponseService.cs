@@ -82,29 +82,27 @@ public class ConversationResponseService : IConversationResponseService
 
             if (shouldStreamTTS)
             {
-                // User Request: "ai responce should take the ai responce not translated text for tts and the voice could be default and the languge should be audiolanguage"
-                // Logic:
-                // If Intent == AI_ASSISTANCE:
-                //   - TTS Text = translationResponse.AIAssistance.Response (The answer in source lang)
-                //   - TTS Lang = translationResponse.AudioLanguage (Source lang)
-                // Else (Translation):
-                //   - TTS Text = translationResponse.Translation
-                //   - TTS Lang = translationResponse.TranslationLanguage
+                // ROBUS LOGIC: Fallback to Translation if AI Response is empty
                 string ttsText = (translationResponse.Intent == "AI_ASSISTANCE")
-                    ? translationResponse.AIAssistance.Response ?? string.Empty
+                    ? translationResponse.AIAssistance.Response ?? translationResponse.Translation ?? string.Empty
                     : translationResponse.Translation ?? string.Empty;
                 
+                // If we fell back to Translation (Target Lang), we must use valid language for TTS
+                // AI Response is usually in AudioLanguage (Source). Translation is in TranslationLanguage (Target).
                 string ttsLanguage = (translationResponse.Intent == "AI_ASSISTANCE")
-                    ? translationResponse.AudioLanguage ?? "en" 
+                    ? (!string.IsNullOrEmpty(translationResponse.AIAssistance.Response) ? translationResponse.AudioLanguage : translationResponse.TranslationLanguage) ?? "en"
                     : translationResponse.TranslationLanguage ?? "en";
 
                 if (!string.IsNullOrEmpty(ttsText))
                 {
-                    // For AI_ASSISTANCE, use "System" or null so we don't mimic the user's voice.
-                    // This ensures the voice is selected based purely on language and gender (defaulting to Female Assistant).
+                    // For AI_ASSISTANCE, use null (default voice) to distinguish from user
                     string? ttsSpeakerId = (translationResponse.Intent == "AI_ASSISTANCE") ? null : activeSpeaker.SpeakerId;
                     
                     tasks.Add(SendToTTSContinuousAsync(connectionId, sessionId, ttsSpeakerId, ttsText, ttsLanguage, translationResponse.EstimatedGender, isPremium: true));
+                }
+                else 
+                {
+                    _logger.LogWarning("⚠️ AI Assistance detected but no text available for TTS.");
                 }
             }
 
@@ -125,8 +123,7 @@ public class ConversationResponseService : IConversationResponseService
                 activeSpeaker,
                 utterance.SpeakerConfidence,
                 translationResponse.TurnId,
-                translationResponse.IsPulse,
-                translationResponse.FactExtraction.HasSignificantInfo
+                translationResponse.IsPulse
             );
 
             tasks.Add(Task.Run(async () =>
@@ -136,29 +133,37 @@ public class ConversationResponseService : IConversationResponseService
                 // 🛑 HISTORY GUARD: Only add to database history for the FINAL (Brain) response
                 if (!translationResponse.IsPulse)
                 {
-                    await AddToHistoryAsync(sessionId, mainItem, activeSpeaker.SpeakerId, translationResponse.AudioLanguage ?? "en-US");
+                    await AddToHistoryAsync(sessionId, mainItem, activeSpeaker.SpeakerId, translationResponse.AudioLanguage ?? "en-US", translationResponse.FactExtraction?.Facts);
                 }
             }));
 
-            if (translationResponse.Intent == "AI_ASSISTANCE" && !string.IsNullOrEmpty(translationResponse.AIAssistance.ResponseTranslated))
+            // ROBUST AI ITEM CREATION
+            if (translationResponse.Intent == "AI_ASSISTANCE")
             {
-                var aiItem = _frontendService.CreateFromAIResponse(
-                    translationResponse.AudioLanguage ?? "en-US",
-                    translationResponse.AIAssistance.Response ?? string.Empty,
-                    translationResponse.AIAssistance.ResponseTranslated,
-                    translationResponse.TranslationLanguage ?? "en",
-                    1.0f,
-                    translationResponse.TurnId + "_ai" // Correlate AI sub-item
-                );
-                tasks.Add(Task.Run(async () =>
+                // Fallback: If ResponseTranslated is empty, validation against Response or Translation
+                var aiResponseOriginal = translationResponse.AIAssistance.Response ?? translationResponse.Translation ?? "";
+                var aiResponseTranslated = translationResponse.AIAssistance.ResponseTranslated ?? translationResponse.Translation ?? "";
+                
+                if (!string.IsNullOrEmpty(aiResponseTranslated))
                 {
-                    await _notificationService.SendFrontendConversationItemAsync(connectionId, aiItem);
-                    
-                    if (!translationResponse.IsPulse)
+                    var aiItem = _frontendService.CreateFromAIResponse(
+                        translationResponse.AudioLanguage ?? "en-US",
+                        aiResponseOriginal,
+                        aiResponseTranslated,
+                        translationResponse.TranslationLanguage ?? "en",
+                        1.0f,
+                        translationResponse.TurnId + "_ai" // Correlate AI sub-item
+                    );
+                    tasks.Add(Task.Run(async () =>
                     {
-                        await AddToHistoryAsync(sessionId, aiItem, "ai-assistant", translationResponse.AudioLanguage ?? "en-US");
-                    }
-                }));
+                        await _notificationService.SendFrontendConversationItemAsync(connectionId, aiItem);
+                        
+                        if (!translationResponse.IsPulse)
+                        {
+                            await AddToHistoryAsync(sessionId, aiItem, "ai-assistant", translationResponse.AudioLanguage ?? "en-US");
+                        }
+                    }));
+                }
             }
 
             await Task.WhenAll(tasks);
@@ -230,7 +235,7 @@ public class ConversationResponseService : IConversationResponseService
         }
     }
 
-    private async Task AddToHistoryAsync(string sessionId, FrontendConversationItem conversationItem, string speakerId, string audioLanguage)
+    private async Task AddToHistoryAsync(string sessionId, FrontendConversationItem conversationItem, string speakerId, string audioLanguage, List<FactItem>? facts = null)
     {
         try
         {
@@ -254,6 +259,33 @@ public class ConversationResponseService : IConversationResponseService
                               .SetMetadata("speakerConfidence", conversationItem.SpeakerConfidence);
 
                 session.AddConversationTurn(conversationTurn);
+
+                // 🧠 Process Fact Extraction
+                if (facts != null && facts.Count > 0)
+                {
+                    foreach (var fact in facts)
+                    {
+                        if (fact.Operation?.ToUpper() == "DELETE")
+                        {
+                            session.DeleteFact(fact.Key);
+                        }
+                        else
+                        {
+                            // Create or Update
+                            var newFact = Fact.Create(
+                                fact.Key,
+                                fact.Value,
+                                speakerId,
+                                conversationItem.SpeakerName ?? "Unknown",
+                                conversationTurn.TurnId,
+                                session.ConversationHistory.Count, // Current turn count
+                                DateTime.UtcNow
+                            );
+                            session.UpdateFact(newFact);
+                        }
+                    }
+                }
+
                 await _sessionRepository.SaveAsync(session, CancellationToken.None);
             }
         }

@@ -93,7 +93,18 @@ public class AIAssistanceData
 
 public class FactExtractionPayload
 {
-    public bool HasSignificantInfo { get; set; } = false;
+    public List<FactItem> Facts { get; set; } = new();
+}
+
+public class FactItem
+{
+    public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+    public string Operation { get; set; } = "ADD"; // "ADD", "UPDATE", "DELETE"
+    public string SpeakerName { get; set; } = string.Empty;
+    public string SpeakerId { get; set; } = string.Empty;
+    public long Timestamp { get; set; }
+    public int TurnNumber { get; set; }
 }
 
 public class SpeakerServicePayload

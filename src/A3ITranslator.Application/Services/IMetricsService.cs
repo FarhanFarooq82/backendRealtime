@@ -54,6 +54,7 @@ public class CycleMetrics
     public long GenAILatencyMs { get; set; }
     public string ImprovedTranscription { get; set; } = string.Empty;
     public string Translation { get; set; } = string.Empty;
+    public DateTime? ConversationItemSentTime { get; set; }
 }
 
 public interface IMetricsService

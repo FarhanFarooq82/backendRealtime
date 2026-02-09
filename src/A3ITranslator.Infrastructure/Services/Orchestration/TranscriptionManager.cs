@@ -109,16 +109,25 @@ public class TranscriptionManager : ITranscriptionManager
             secondaryCts.Cancel();
         }
 
+        // Fallback if no winner selected during monitoring
         winner ??= primaryUtteranceManager.GetConfidence() >= secondaryUtteranceManager.GetConfidence() 
             ? primaryUtteranceManager 
             : secondaryUtteranceManager;
 
+        var loser = winner == primaryUtteranceManager ? secondaryUtteranceManager : primaryUtteranceManager;
+
         return new TranscriptionCompetitionResult
         {
             WinnerLanguage = winner.LanguageCode,
-            AllResults = winner.GetAllResults(),
-            BestText = winner.GetBestText(),
-            Confidence = winner.GetConfidence(),
+            WinnerResults = winner.GetAllResults(),
+            WinnerBestText = winner.GetBestText(),
+            WinnerConfidence = winner.GetConfidence(),
+            
+            LoserLanguage = loser.LanguageCode,
+            LoserResults = loser.GetAllResults(),
+            LoserBestText = loser.GetBestText(),
+            LoserConfidence = loser.GetConfidence(),
+            
             TotalDurationSeconds = winner.GetTotalDurationSeconds()
         };
     }

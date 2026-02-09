@@ -55,7 +55,7 @@ public class CsvMetricsLogger : IMetricsService
             // Initialize Cycle Metrics File
             if (!File.Exists(_cycleLogPath))
             {
-                var header = "Timestamp,SessionId,ConnectionId,CycleStartTime,VADTriggerTime,GenAIStartTime,GenAIEndTime,CycleEndTime,AudioDurationSec,STTCost,GenAICost,TTSCost,TotalCost,GenAILatencyMs,ImprovedTranscription,Translation";
+                var header = "Timestamp,SessionId,ConnectionId,CycleStartTime,VADTriggerTime,GenAIStartTime,GenAIEndTime,CycleEndTime,ConversationItemSentTime,AudioDurationSec,STTCost,GenAICost,TTSCost,TotalCost,GenAILatencyMs,ImprovedTranscription,Translation";
                 File.WriteAllText(_cycleLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created cycle log at: {_cycleLogPath}");
             }
@@ -129,7 +129,7 @@ public class CsvMetricsLogger : IMetricsService
         await _fileLock.WaitAsync();
         try
         {
-            var line = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3:yyyy-MM-dd HH:mm:ss.fff},{4:yyyy-MM-dd HH:mm:ss.fff},{5:yyyy-MM-dd HH:mm:ss.fff},{6:yyyy-MM-dd HH:mm:ss.fff},{7:yyyy-MM-dd HH:mm:ss.fff},{8:F4},{9:F6},{10:F6},{11:F6},{12:F6},{13},{14},{15}",
+            var line = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3:yyyy-MM-dd HH:mm:ss.fff},{4:yyyy-MM-dd HH:mm:ss.fff},{5:yyyy-MM-dd HH:mm:ss.fff},{6:yyyy-MM-dd HH:mm:ss.fff},{7:yyyy-MM-dd HH:mm:ss.fff},{8:yyyy-MM-dd HH:mm:ss.fff},{9:F4},{10:F6},{11:F6},{12:F6},{13:F6},{14},{15},{16}",
                 metrics.Timestamp,
                 EscapeCsv(metrics.SessionId),
                 EscapeCsv(metrics.ConnectionId),
@@ -138,6 +138,7 @@ public class CsvMetricsLogger : IMetricsService
                 metrics.GenAIStartTime,
                 metrics.GenAIEndTime,
                 metrics.CycleEndTime,
+                metrics.ConversationItemSentTime,
                 metrics.AudioDurationSec,
                 metrics.STTCost,
                 metrics.GenAICost,

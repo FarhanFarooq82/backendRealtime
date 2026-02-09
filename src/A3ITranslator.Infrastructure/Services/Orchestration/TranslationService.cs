@@ -43,7 +43,7 @@ public class TranslationService : ITranslationService
     {
         var session = await _sessionRepository.GetByIdAsync(sessionId, CancellationToken.None);
         var recentHistory = new List<ConversationHistoryItem>();
-        var significantHistory = new List<ConversationHistoryItem>();
+        var facts = new List<FactItem>();
         string? rollingSummary = null;
         
         if (session != null)
@@ -59,24 +59,21 @@ public class TranslationService : ITranslationService
                 })
                 .ToList();
 
+            // Populate Facts for context
+            facts = session.Facts.Select(f => new FactItem 
+            { 
+                Key = f.Key, 
+                Value = f.Value,
+                SpeakerName = f.SourceSpeakerName,
+                SpeakerId = f.SourceSpeakerId,
+                TurnNumber = f.TurnNumber,
+                Timestamp = f.LastUpdatedAt.Ticks
+            }).ToList();
+
             if (isPulse)
             {
                 if (session.Metadata.TryGetValue("rollingSummary", out var summary))
                     rollingSummary = summary.ToString();
-            }
-            else
-            {
-                // Only Brain gets the deeper 'Significant History' to save Pulse tokens
-                significantHistory = session.ConversationHistory
-                    .Where(t => t.HasSignificantInfo)
-                    .TakeLast(10)
-                    .Select(t => new ConversationHistoryItem 
-                    { 
-                        SpeakerId = t.SpeakerId, 
-                        SpeakerName = t.SpeakerName, 
-                        Text = t.OriginalText 
-                    })
-                    .ToList();
             }
         }
 
@@ -97,7 +94,7 @@ public class TranslationService : ITranslationService
                 ["provisionalName"] = provisionalDisplayName ?? "Unknown",
                 ["expectedLanguageCode"] = utterance.SourceLanguage,
                 ["recentHistory"] = recentHistory,
-                ["significantHistory"] = significantHistory,
+                ["facts"] = facts,
                 ["transcriptionConfidence"] = utterance.TranscriptionConfidence,
                 ["speakerConfidence"] = utterance.SpeakerConfidence
             }
