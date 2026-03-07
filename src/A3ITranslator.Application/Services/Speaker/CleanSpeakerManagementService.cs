@@ -118,13 +118,15 @@ public class SpeakerManagementService : ISpeakerManagementService
                 // Note: estimatedGender and socialRole would need fields in SpeakerInsight or SpeakerProfile
                 session.AddSpeaker(newProfile);
             }
-            else if (!existing.IsLocked)
+            else if (!existing.IsLocked || rosterSpeaker.IsNameExplicitlyCorrected)
             {
-                // Update existing speaker if not locked
+                // Update existing speaker if not locked OR if explicitly corrected by the user in this turn
                 existing.DisplayName = rosterSpeaker.DisplayName;
                 existing.PreferredLanguage = rosterSpeaker.PreferredLanguage;
                 existing.Insights.CommunicationStyle = rosterSpeaker.Tone;
-                existing.IsLocked = rosterSpeaker.IsLocked;
+                
+                // Maintain the lock if it was already locked, otherwise use the incoming lock status
+                existing.IsLocked = existing.IsLocked || rosterSpeaker.IsLocked;
             }
         }
 

@@ -11,30 +11,21 @@ public interface IHubClient
 {
     Task ReceiveTranscription(string text, string language, bool isFinal);
     Task ReceiveError(string message);
-    Task ReceiveAudioChunk(byte[] audioChunk);
-    Task ReceiveTranslation(string text, string language, bool isFinal);
-    Task ReceiveTransactionComplete();
-    
-    // Audio reception state management
-    Task ReceiveAudioReceptionAck(string message);
-    Task ReceiveAudioReceptionError(string errorMessage);
     
     // Processing state updates
     Task ReceiveProcessingStatus(string status);
-    Task ReceiveProcessingError(string errorMessage);
     
     // Cycle completion
     Task ReceiveCycleCompletion(bool readyForNext);
     
     // Conversation items
-    Task ReceiveConversationItem(ConversationItem conversationItem);
     Task ReceiveTTSAudioSegment(TTSAudioSegment audioSegment);
     
-    // Frontend-specific simplified DTOs
     Task ReceiveFrontendSpeakerList(FrontendSpeakerListUpdate speakerList);
-    Task ReceiveFrontendConversationItem(FrontendConversationItem conversationItem);
-    Task ReceiveFrontendTTSChunk(FrontendTTSChunk ttsChunk);
     
+    // UI bubbles
+    Task ReceiveFrontendConversationItem(FrontendConversationItem item);
+
     // Session management
     Task ReceiveStructuredSummary(SessionSummaryDTO summary);
     Task ReceiveFinalizationSuccess();

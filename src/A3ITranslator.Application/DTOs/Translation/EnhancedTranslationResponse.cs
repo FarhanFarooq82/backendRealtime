@@ -81,6 +81,7 @@ public class RosterSpeakerProfile
     public string PreferredLanguage { get; set; } = string.Empty;
     public string Tone { get; set; } = "casual";
     public bool IsLocked { get; set; }
+    public bool IsNameExplicitlyCorrected { get; set; } = false;
 }
 
 public class AIAssistanceData

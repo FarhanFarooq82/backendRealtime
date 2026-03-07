@@ -16,7 +16,9 @@ using System.Text;
 using System.Linq;
 using System.Collections.Concurrent;
 using A3ITranslator.Application.Models;
-using A3ITranslator.Infrastructure.Services.Translation; // ✅ For ConversationHistoryItem
+using System.Text.Json;
+using A3ITranslator.Application.DTOs.Translation;
+using A3ITranslator.Infrastructure.Services.Translation; // For JsonStreamParser
 using System.Diagnostics;
 
 // ✅ PURE DOMAIN: Type aliases for clean architecture
@@ -45,6 +47,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IConversationResponseService _responseService;
     private readonly IMetricsService _metricsService;
     private readonly ITranslationOrchestrator _translationOrchestrator;
+    private readonly IGenAIService _genAIService;
+    private readonly IAzureTextTranslatorService _textTranslatorService;
 
     // Per-connection conversation state
     private readonly Dictionary<string, ConversationState> _connectionStates = new();
@@ -63,7 +67,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ITranslationService translationService,
         IConversationResponseService responseService,
         IMetricsService metricsService,
-        ITranslationOrchestrator translationOrchestrator)
+        ITranslationOrchestrator translationOrchestrator,
+        IGenAIService genAIService,
+        IAzureTextTranslatorService textTranslatorService)
     {
         _notificationService = notificationService;
         _ttsService = ttsService;
@@ -77,6 +83,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _responseService = responseService;
         _metricsService = metricsService;
         _translationOrchestrator = translationOrchestrator;
+        _genAIService = genAIService;
+        _textTranslatorService = textTranslatorService;
         _logger = logger;
     }
 
@@ -88,6 +96,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
     {
         var state = GetOrCreateConversationState(connectionId);
         
+        Console.WriteLine($"TIMESTAMP_AUDIO_CHUNK_EVAL: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - CanAcceptAudio: {state.CanAcceptAudio}, CycleState: {state.CycleState}, ChunkSize: {audioChunk.Length}");
+
         // 🛡️ ZERO-LOSS AUDIO: If we are busy, buffer the chunk for the next cycle
         if (!state.CanAcceptAudio)
         {
@@ -138,6 +148,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
             // Write the current triggering chunk
             var writeResult = state.AudioStreamChannel.Writer.TryWrite(audioChunk);
+            Console.WriteLine($"TIMESTAMP_AUDIO_CHANNEL_TRYWRITE_NEW_CYCLE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - WriteResult: {writeResult}, ChunkSize: {audioChunk.Length}");
             if (!writeResult)
             {
                 _logger.LogWarning("❌ ORCHESTRATOR: Failed to write initial audio chunk to channel for {ConnectionId}", connectionId);
@@ -152,7 +163,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         {
             // Continue feeding existing pipeline with additional chunks
             // If writer is closed (draining), buffer for next cycle
-            if (!state.AudioStreamChannel.Writer.TryWrite(audioChunk))
+            var existingWriteResult = state.AudioStreamChannel.Writer.TryWrite(audioChunk);
+            Console.WriteLine($"TIMESTAMP_AUDIO_CHANNEL_TRYWRITE_EXISTING_CYCLE: {DateTime.UtcNow:HH:mm:ss.fff} - {connectionId} - WriteResult: {existingWriteResult}, ChunkSize: {audioChunk.Length}");
+            if (!existingWriteResult)
             {
                 state.BufferPendingChunk(audioChunk);
                 _logger.LogDebug("📥 Pipeline draining, buffered chunk for next cycle for {ConnectionId}", connectionId);
@@ -390,6 +403,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
             else
             {
                 _logger.LogDebug("✅ No accumulated text to process for {ConnectionId}", connectionId);
+                // 🛑 CRITICAL FIX: Tell the frontend the cycle is complete even if we had no text!
+                // Otherwise the frontend gets permanently stuck waiting for a response that will never come.
+                await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
             }
         }
         catch (OperationCanceledException)
@@ -530,98 +546,335 @@ public class ConversationOrchestrator : IConversationOrchestrator
         string turnId = Guid.NewGuid().ToString();
         try
         {
-            _logger.LogInformation("🎯 {TurnId}: Processing parallel Pulse & Brain cycle for {ConnectionId}", turnId, connectionId);
+            _logger.LogInformation("🎯 {TurnId}: Processing parallel Micro-Agent cycle for {ConnectionId}", turnId, connectionId);
 
             var utteranceWithContext = state.GetCompleteUtterance();
-
-            // 1. START PARALLEL TRACKS
-            // 1. START PARALLEL TRACKS
-            // Track A: Pulse (Fast Translation)
-            var pulseTask = _translationService.ProcessTranslationAsync(
+            var session = await _sessionRepository.GetByIdAsync(state.SessionId!, CancellationToken.None);
+            
+            var request = await _translationService.CreateTranslationRequestAsync(
                 state.SessionId!, 
                 utteranceWithContext, 
                 state.LastSpeakerId, 
                 state.ProvisionalSpeakerId, 
                 state.ProvisionalDisplayName,
                 turnId,
-                true); // IsPulse = true
+                true);
 
-            // Track B: Brain (Deep Analysis)
-            var brainTask = _translationService.ProcessTranslationAsync(
-                state.SessionId!, 
-                utteranceWithContext, 
-                state.LastSpeakerId, 
-                state.ProvisionalSpeakerId, 
-                state.ProvisionalDisplayName,
-                turnId,
-                false); // IsPulse = false
+            // 1. Build Prompts for ALL Agents
+            _logger.LogInformation("🎯 {TurnId}: Building Agent prompts...", turnId);
+            var agent2Prompts = await _translationOrchestrator.BuildAgent2PromptsAsync(request);
+            var agent3Prompts = await _translationOrchestrator.BuildAgent3PromptsAsync(request);
 
             state.GenAIStartTime = DateTime.UtcNow;
 
-            // 2. AWAIT PULSE (Immediate Audio delivery)
-            var pulseResponse = await pulseTask;
-            state.GenAIEndTime = DateTime.UtcNow;
+            // 2. PARALLEL FAST PATHS: Fire Intent Router & Azure MNT           
+            string sourceLangCode = utteranceWithContext.SourceLanguage.Split('-').FirstOrDefault() ?? "en";
+            string targetLangCode = utteranceWithContext.TargetLanguage.Split('-').FirstOrDefault() ?? "en";
+            
+            var mntStartTime = DateTime.UtcNow;
+            var mntTask = _textTranslatorService.TranslateTextAsync(utteranceWithContext.Text, sourceLangCode, targetLangCode);
 
-            _logger.LogInformation("⚡ {TurnId}: Pulse track ready. Streaming audio...", turnId);
+            // 3. BACKGROUND PATH: Fire Agent 2 (Super Agent) and Agent 3
+            _logger.LogInformation("🎯 {TurnId}: Firing Agent 2 (Super Agent) and Agent 3 in background...", turnId);
+            
+            var agent2StartTime = DateTime.UtcNow;
+            var agent2Task = _genAIService.GenerateResponseAsync(agent2Prompts.systemPrompt, agent2Prompts.userPrompt);
 
-            // FIRE PULSE AUDIO IMMEDIATELY (Zero-latency speech)
-            _ = _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.LastSpeakerId, pulseResponse);
+            // 2. RUN TEXT TRANSLATION (MNT) IMMEDIATELY
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            string mntTranslation = await mntTask;
+            var mntEndTime = DateTime.UtcNow;
+            stopwatch.Stop();
+            
+            _logger.LogInformation("⚡ {TurnId}: MNT Translation Finished: {Text}", turnId, mntTranslation);
 
-            // If Pulse already knows it's an AI task, show "Thinking..." status
-            if (pulseResponse.Intent == "AI_ASSISTANCE")
+            // Log MNT Metrics
+            _ = _metricsService.LogMetricsAsync(new UsageMetrics
             {
-                await _notificationService.NotifyProcessingStatusAsync(connectionId, "🤖 Assistant is thinking...");
-            }
-
-            // 3. AWAIT BRAIN (Contextual refinement)
-            var brainResponse = await brainTask;
-                _logger.LogInformation("🧠 {TurnId}: Brain enrichment completed. Merging...", turnId);
-
-                // 4. MERGE RESULTS (Convergance)
-                // We trust Brain for most things, but Pulse might be the baseline
-                if (string.IsNullOrEmpty(brainResponse.Translation) && !string.IsNullOrEmpty(pulseResponse.Translation))
+                SessionId = state.SessionId ?? "",
+                ConnectionId = connectionId,
+                Category = ServiceCategory.Translation,
+                Provider = "Azure",
+                Operation = "MNT_TextTranslation",
+                UserPrompt = utteranceWithContext.Text,
+                Response = mntTranslation,
+                LatencyMs = (long)stopwatch.ElapsedMilliseconds,
+                TurnId = turnId,
+                Track = "MNT",
+                StartTime = mntStartTime,
+                EndTime = mntEndTime
+            });
+           // Fire Agent 3 as detached background "Fire and Forget" task
+            _ = Task.Run(async () => 
+            {
+                try 
                 {
-                    brainResponse.Translation = pulseResponse.Translation;
-                    brainResponse.TranslationLanguage = pulseResponse.TranslationLanguage;
-                }
+                    _logger.LogInformation("🚀 {TurnId}: Agent 3 (Fact Manager) started in asynchronous background...", turnId);
+                    
+                    var agent3StartTime = DateTime.UtcNow;
+                    var factResponse = await _genAIService.GenerateResponseAsync(agent3Prompts.systemPrompt, agent3Prompts.userPrompt);
+                    var agent3EndTime = DateTime.UtcNow;
 
-                // 🚨 CONFLICT RESOLUTION: If Pulse thought it was AI, but Brain (deeper analysis) says it's just Translation,
-                // we must respect Brain and ensure we don't accidentally treat it as an AI response.
-                if (pulseResponse.Intent == "AI_ASSISTANCE" && brainResponse.Intent == "SIMPLE_TRANSLATION")
-                {
-                    _logger.LogInformation("🔄 Intent Correction: Pulse thought AI_ASSISTANCE, but Brain corrected to SIMPLE_TRANSLATION. Sending Translation.");
-                    // Force intent to Translation so ResponseService uses TTS correctly
-                    brainResponse.Intent = "SIMPLE_TRANSLATION"; 
-                    // Ensure we have a translation (fallback to Pulse if Brain didn't provide one because it was confused)
-                    if (string.IsNullOrEmpty(brainResponse.Translation))
+                    _ = _metricsService.LogMetricsAsync(new UsageMetrics
                     {
-                         brainResponse.Translation = pulseResponse.Translation;
-                         brainResponse.TranslationLanguage = pulseResponse.TranslationLanguage;
+                        SessionId = state.SessionId ?? "",
+                        ConnectionId = connectionId,
+                        Category = ServiceCategory.Translation,
+                        Provider = _genAIService.GetServiceName(),
+                        Model = factResponse.Model,
+                        Operation = "Agent3_FactExtraction",
+                        UserPrompt = agent3Prompts.userPrompt,
+                        Response = factResponse.Content,
+                        InputUnits = factResponse.Usage.InputTokens,
+                        OutputUnits = factResponse.Usage.OutputTokens,
+                        InputUnitType = "Tokens",
+                        OutputUnitType = "Tokens",
+                        TurnId = turnId,
+                        Track = "Agent3",
+                        StartTime = agent3StartTime,
+                        EndTime = agent3EndTime,
+                        LatencyMs = (long)(agent3EndTime - agent3StartTime).TotalMilliseconds
+                    });
+
+                    var cleanedJson = CleanJsonStructure(factResponse.Content);
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    
+                    Agent3Response? agent3Data = null;
+                    try
+                    {
+                        agent3Data = JsonSerializer.Deserialize<Agent3Response>(cleanedJson, options);
+                        _logger.LogInformation("✅ {TurnId}: Agent 3 completed fact extraction ({Count} new facts).", turnId, agent3Data?.FactExtraction?.Facts?.Count ?? 0);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ {TurnId}: Failed to parse Agent 3 JSON.", turnId);
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ {TurnId}: Agent 3 background task failed.", turnId);
+                }
+            });
 
-                // 5. SPEAKER IDENTIFICATION & STATE UPDATE
-                var speakerResult = await SyncSpeakerAndFactsAsync(state, brainResponse, utteranceWithContext);
-                state.LastSpeakerId = speakerResult.SpeakerId;
-
-                // 6. SHIP FINAL MERGED RESPONSE (Single Conversation Item)
-                state.StartCompleting();
-                await _responseService.SendResponseAsync(connectionId, state.SessionId!, state.LastSpeakerId, utteranceWithContext, brainResponse, speakerResult);
-                
-                state.ResponseSentTime = DateTime.UtcNow;
-
-                // 7. BACKGROUND TASKS
-                _ = UpdateRollingSummaryIfNeededAsync(state);
-                _ = LogCycleMetricsAsync(connectionId, state, brainResponse, utteranceWithContext);
+            var fastResponse = new EnhancedTranslationResponse 
+            { 
+                Translation = mntTranslation, 
+                // CRITICAL FIX: Use the actual calculated target language, NOT the session's fallback language
+                TranslationLanguage = utteranceWithContext.TargetLanguage,
+                Intent = "SIMPLE_TRANSLATION" 
+            };
             
+            // 3. FIRE FAST-TWITCH TTS IMMEDIATELY
+            _logger.LogInformation("⚡ Fast-Twitch TTS (Azure MNT): Firing instant translation audio in background.");
+            _ = Task.Run(async () => {
+                try {
+                    await _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.ProvisionalSpeakerId ?? state.LastSpeakerId, fastResponse);
+                } catch (Exception ex) {
+                    _logger.LogError(ex, "Background TTS task failed.");
+                }
+            });
 
-            await _notificationService.NotifyCycleCompletionAsync(connectionId, false);
-            _logger.LogInformation("✅ {TurnId}: Utterance pulse delivered for {ConnectionId}", turnId, connectionId);
-        }
-        catch (Exception ex)
+            // 4. AWAIT AGENT 2 (SUPER AGENT) TO COMPLETE THE CYCLE
+            // We lock the cycle (microphone) until Agent 2 decides if AI Assistance is required, 
+            // and generates the corresponding conversation items.
+            await _notificationService.NotifyProcessingStatusAsync(connectionId, "🧠 Tolk is thinking...");
+
+            // 5. TTS ROUTING AND DETACHED BACKGROUND PROCESSING
+            Func<Task> processAgent2BackgroundAsync = async () =>
+            {
+                try
+                {
+                    var agent2ResponseRaw = await agent2Task;
+                    var agent2EndTime = DateTime.UtcNow;
+
+                    _ = _metricsService.LogMetricsAsync(new UsageMetrics
+                    {
+                        SessionId = state.SessionId ?? "",
+                        ConnectionId = connectionId,
+                        Category = ServiceCategory.SpeakerID,
+                        Provider = _genAIService.GetServiceName(),
+                        Model = agent2ResponseRaw.Model,
+                        Operation = "Agent2_SuperAgent",
+                        UserPrompt = agent2Prompts.userPrompt,
+                        Response = agent2ResponseRaw.Content,
+                        InputUnits = agent2ResponseRaw.Usage?.InputTokens ?? 0,
+                        OutputUnits = agent2ResponseRaw.Usage?.OutputTokens ?? 0,
+                        InputUnitType = "Tokens",
+                        OutputUnitType = "Tokens",
+                        TurnId = turnId,
+                        Track = "Agent2",
+                        StartTime = agent2StartTime,
+                        EndTime = agent2EndTime,
+                        LatencyMs = (long)(agent2EndTime - agent2StartTime).TotalMilliseconds
+                    });
+
+                    var cleanedJson2 = CleanJsonStructure(agent2ResponseRaw.Content);
+                    var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    
+                    Agent2Response agent2Data;
+                    try
+                    {
+                        agent2Data = JsonSerializer.Deserialize<Agent2Response>(cleanedJson2, jsonOptions) ?? new Agent2Response();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ {TurnId}: Failed to parse Super Agent 2 JSON. Using empty fallback.", turnId);
+                        agent2Data = new Agent2Response();
+                    }
+
+                    state.GenAIEndTime = DateTime.UtcNow;
+
+                    // Dynamically resolve Intent based solely on Agent 2 output
+                    string intentStr = "SIMPLE_TRANSLATION";
+                    if (agent2Data.AIAssistance != null && !string.IsNullOrWhiteSpace(agent2Data.AIAssistance.Response))
+                    {
+                        intentStr = "AI_ASSISTANCE";
+                    }
+
+                    // 7. Resolve Final Responses
+                    string? aiAssistanceResponse = null;
+                    if (intentStr == "AI_ASSISTANCE" && agent2Data.AIAssistance != null)
+                    {
+                        aiAssistanceResponse = !string.IsNullOrWhiteSpace(agent2Data.AIAssistance.ResponseTranslated) 
+                            ? agent2Data.AIAssistance.ResponseTranslated 
+                            : agent2Data.AIAssistance.Response;
+                        
+                        // Fire AI Assistance Audio
+                        var aiAudioResponse = new EnhancedTranslationResponse 
+                        { 
+                            Translation = aiAssistanceResponse ?? mntTranslation, // Fallback if AI empty
+                            TranslationLanguage = fastResponse.TranslationLanguage,
+                            Intent = "AI_ASSISTANCE" 
+                        };
+                        
+                        _logger.LogInformation("⚡ {TurnId}: Heavy-Context TTS: Firing AI Contextual Assistant audio.", turnId);
+                        
+                        // AWAIT the AI audio to finish playing if we are in AI mode BEFORE unlocking mic
+                        await _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.ProvisionalSpeakerId ?? state.LastSpeakerId, aiAudioResponse);
+                    }
+
+                    // The main visual element uses Super Agent 2 data (No MNT Merge needed for UI text)
+                    var baseResponse = new EnhancedTranslationResponse
+                    {
+                        ImprovedTranscription = agent2Data.ImprovedTranscription, 
+                        Translation = string.IsNullOrWhiteSpace(agent2Data.Translation) ? mntTranslation : agent2Data.Translation, // Use Super Agent 2's translation, fallback to MNT if empty
+                        Intent = "SIMPLE_TRANSLATION", // Force base item to be regular translation
+                        TranslationLanguage = utteranceWithContext.TargetLanguage,
+                        AudioLanguage = !string.IsNullOrWhiteSpace(utteranceWithContext.SourceLanguage) ? utteranceWithContext.SourceLanguage : request.SourceLanguage,
+                        EstimatedGender = agent2Data.EstimatedGender,
+                        Confidence = agent2Data.Confidence,
+                        TurnAnalysis = agent2Data.TurnAnalysis,
+                        SessionRoster = agent2Data.SessionRoster,
+                        FactExtraction = new FactExtractionPayload(), // Detached Agent 3
+                        Usage = new GenAIUsage
+                        {
+                            InputTokens = agent2ResponseRaw.Usage?.InputTokens ?? 0,
+                            OutputTokens = agent2ResponseRaw.Usage?.OutputTokens ?? 0
+                        }
+                    };
+
+                    // 5. SPEAKER IDENTIFICATION & STATE UPDATE
+                    var speakerResult = await SyncSpeakerAndFactsAsync(state, baseResponse, utteranceWithContext);
+                    state.LastSpeakerId = speakerResult.SpeakerId;
+
+                    // 6. SHIP FINAL RESPONSE (Main user utterance)
+                    await _responseService.SendResponseAsync(connectionId, state.SessionId!, speakerResult.SpeakerId, utteranceWithContext, baseResponse, speakerResult);
+                        
+                    // 7. SHIP ADDITIONAL RESPONSE (AI Assistance - Offset by 100ms)
+                    if (aiAssistanceResponse != null)
+                    {
+                        var aiResponseForUI = new EnhancedTranslationResponse
+                        {
+                            ImprovedTranscription = agent2Data.AIAssistance?.Response ?? "",
+                            Translation = aiAssistanceResponse,
+                            Intent = "AI_ASSISTANCE",
+                            TranslationLanguage = baseResponse.TranslationLanguage,
+                            AudioLanguage = baseResponse.AudioLanguage,
+                            EstimatedGender = "Unknown",
+                            Confidence = 1.0f
+                        };
+
+                        // Add 100ms to the CreatedAt to ensure ordered display
+                        var modifiedUtterance = new UtteranceWithContext
+                        {
+                            Text = utteranceWithContext.Text,
+                            SourceLanguage = utteranceWithContext.SourceLanguage,
+                            TargetLanguage = utteranceWithContext.TargetLanguage,
+                            CreatedAt = utteranceWithContext.CreatedAt.AddMilliseconds(150), // Offset
+                            TranscriptionConfidence = 1.0f
+                        };
+
+                        // The speaker is "Smart Tolk" or "AI Assistant", we can use a hardcoded AI ID
+                        await _responseService.SendResponseAsync(connectionId, state.SessionId!, "assistant", modifiedUtterance, aiResponseForUI, new SpeakerOperationResult { SpeakerId = "assistant", DisplayName = "Smart Tolk" });
+                    }
+
+                    state.ResponseSentTime = DateTime.UtcNow;
+
+                    // 7. BACKGROUND TASKS
+                    _ = LogCycleMetricsAsync(connectionId, state, baseResponse, utteranceWithContext);
+
+                    _logger.LogInformation("✅ {TurnId}: Utterance cycle UI delivered securely for {ConnectionId}", turnId, connectionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ {TurnId}: Error in detached Agent 2 processing: {Message}", turnId, ex.Message);
+                }
+
+                try
+                {
+                    // 8. UNBLOCK: Agent 2 is completely finished. Now allow next cycle.
+                    await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
+                    state.ResetCycle();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ {TurnId}: Error unlocking cycle. {Message}", turnId, ex.Message);
+                }
+            };
+
+        // 6. ASYNC EXECUTION SPLIT
+        if (fastResponse.Intent == "AI_ASSISTANCE")
         {
-            _logger.LogError(ex, "❌ {TurnId}: Error finalising utterance for {ConnectionId}", turnId, connectionId);
+            _logger.LogInformation("🧠 {TurnId}: User requested AI Assistance. Detaching Agent 2...", turnId);
+            
+            _ = Task.Run(async () => {
+                try {
+                    await _notificationService.NotifyProcessingStatusAsync(connectionId, "🧠 Tolk is thinking...");
+                    await processAgent2BackgroundAsync();
+                } catch (Exception ex) {
+                    _logger.LogError(ex, "Background AI task failed.");
+                }
+            });
         }
+        else
+        {
+            _logger.LogInformation("⚡ Fast-Twitch TTS (Azure MNT): Firing instant translation audio in background.");
+            
+            _ = Task.Run(async () => {
+                try {
+                    await _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.ProvisionalSpeakerId ?? state.LastSpeakerId, fastResponse);
+                    await processAgent2BackgroundAsync();
+                } catch (Exception ex) {
+                    _logger.LogError(ex, "Background TTS task failed.");
+                }
+            });
+        }
+
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "❌ {TurnId}: Error finalising utterance for {ConnectionId}", turnId, connectionId);
+    }
+}
+
+private string CleanJsonStructure(string fullJson)
+    {
+        if (string.IsNullOrWhiteSpace(fullJson)) return "{}";
+        var cleanedJson = fullJson.Trim();
+        if (cleanedJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase)) cleanedJson = cleanedJson.Substring(7);
+        else if (cleanedJson.StartsWith("```")) cleanedJson = cleanedJson.Substring(3);
+        if (cleanedJson.EndsWith("```")) cleanedJson = cleanedJson.Substring(0, cleanedJson.Length - 3);
+        return cleanedJson.Trim();
     }
 
     private async Task<SpeakerOperationResult> SyncSpeakerAndFactsAsync(
@@ -629,7 +882,6 @@ public class ConversationOrchestrator : IConversationOrchestrator
         A3ITranslator.Application.DTOs.Translation.EnhancedTranslationResponse brainResponse, 
         UtteranceWithContext utteranceWithContext)
     {
-        // 2. SPEAKER SYNCHRONIZATION
         var speakerPayload = new Application.DTOs.Translation.SpeakerServicePayload
         {
             TurnAnalysis = brainResponse.TurnAnalysis,
@@ -644,6 +896,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         
         return speakerResult;
     }
+
 
     private async Task UpdateRollingSummaryIfNeededAsync(ConversationState state)
     {

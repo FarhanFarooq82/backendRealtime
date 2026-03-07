@@ -128,8 +128,9 @@ public class ConversationResponseService : IConversationResponseService
 
             tasks.Add(Task.Run(async () =>
             {
+                // Send the main UI bubble to the frontend
                 await _notificationService.SendFrontendConversationItemAsync(connectionId, mainItem);
-                
+
                 // 🛑 HISTORY GUARD: Only add to database history for the FINAL (Brain) response
                 if (!translationResponse.IsPulse)
                 {
@@ -156,8 +157,9 @@ public class ConversationResponseService : IConversationResponseService
                     );
                     tasks.Add(Task.Run(async () =>
                     {
+                        // Send the AI UI bubble to the frontend
                         await _notificationService.SendFrontendConversationItemAsync(connectionId, aiItem);
-                        
+
                         if (!translationResponse.IsPulse)
                         {
                             await AddToHistoryAsync(sessionId, aiItem, "ai-assistant", translationResponse.AudioLanguage ?? "en-US");

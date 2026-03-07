@@ -31,20 +31,18 @@ public class TranslationService : ITranslationService
         _speakerService = speakerService;
     }
 
-    public async Task<EnhancedTranslationResponse> ProcessTranslationAsync(
+    public async Task<EnhancedTranslationRequest> CreateTranslationRequestAsync(
         string sessionId, 
         UtteranceWithContext utterance, 
         string? lastSpeakerId, 
         string? provisionalSpeakerId, 
         string? provisionalDisplayName,
         string turnId,
-        bool isPulse,
         bool isPremium = true)
     {
         var session = await _sessionRepository.GetByIdAsync(sessionId, CancellationToken.None);
         var recentHistory = new List<ConversationHistoryItem>();
         var facts = new List<FactItem>();
-        string? rollingSummary = null;
         
         if (session != null)
         {
@@ -69,12 +67,6 @@ public class TranslationService : ITranslationService
                 TurnNumber = f.TurnNumber,
                 Timestamp = f.LastUpdatedAt.Ticks
             }).ToList();
-
-            if (isPulse)
-            {
-                if (session.Metadata.TryGetValue("rollingSummary", out var summary))
-                    rollingSummary = summary.ToString();
-            }
         }
 
         var request = new EnhancedTranslationRequest
@@ -85,7 +77,7 @@ public class TranslationService : ITranslationService
             IsPremium = isPremium,
             SessionId = sessionId,
             TurnId = turnId,
-            IsPulse = isPulse,
+            IsPulse = false,
             SessionContext = new Dictionary<string, object>
             {
                 ["sessionId"] = sessionId,
@@ -100,11 +92,6 @@ public class TranslationService : ITranslationService
             }
         };
 
-        if (rollingSummary != null)
-        {
-            request.SessionContext["summary"] = rollingSummary;
-        }
-
         if (utterance.AudioFingerprint != null)
         {
             var candidates = await _speakerManager.GetSessionSpeakersAsync(sessionId);
@@ -113,6 +100,6 @@ public class TranslationService : ITranslationService
             request.SessionContext["acousticDNA"] = utterance.AudioFingerprint;
         }
 
-        return await _translationOrchestrator.ProcessEnhancedTranslationAsync(request);
+        return request;
     }
 }

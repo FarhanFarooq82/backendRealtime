@@ -26,52 +26,24 @@ public class SignalRNotificationService : IRealtimeNotificationService
     public Task NotifyErrorAsync(string connectionId, string message) =>
         _hubContext.Clients.Client(connectionId).ReceiveError(message);
 
-    public Task NotifyAudioChunkAsync(string connectionId, byte[] audioChunk) =>
-    _hubContext.Clients.Client(connectionId).ReceiveAudioChunk(audioChunk);
-
-    public Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal) =>
-        _hubContext.Clients.Client(connectionId).ReceiveTranslation(text, language, isFinal);
-
-    public Task NotifyTransactionCompleteAsync(string connectionId) =>
-        _hubContext.Clients.Client(connectionId).ReceiveTransactionComplete();
-
-    // ✅ NEW: Audio reception state management
-    public Task NotifyAudioReceptionAckAsync(string connectionId, string message) =>
-        _hubContext.Clients.Client(connectionId).ReceiveAudioReceptionAck(message);
-
-    public Task NotifyAudioReceptionErrorAsync(string connectionId, string errorMessage) =>
-        _hubContext.Clients.Client(connectionId).ReceiveAudioReceptionError(errorMessage);
-
     // ✅ NEW: Processing state updates  
     public Task NotifyProcessingStatusAsync(string connectionId, string status) =>
         _hubContext.Clients.Client(connectionId).ReceiveProcessingStatus(status);
 
-    public Task NotifyProcessingErrorAsync(string connectionId, string errorMessage) =>
-        _hubContext.Clients.Client(connectionId).ReceiveProcessingError(errorMessage);
-
 
     public Task SendCycleCompletionAsync(string sessionId, bool readyForNext) =>
         _hubContext.Clients.Client(sessionId).ReceiveCycleCompletion(readyForNext);
-
-    // ✅ NEW: Conversation orchestration methods
-    public Task SendConversationItemAsync(string connectionId, ConversationItem conversationItem) =>
-        _hubContext.Clients.Client(connectionId).ReceiveConversationItem(conversationItem);
-
     public Task SendTTSAudioSegmentAsync(string connectionId, TTSAudioSegment audioSegment) =>
         _hubContext.Clients.Client(connectionId).ReceiveTTSAudioSegment(audioSegment);
 
     public Task NotifyCycleCompletionAsync(string connectionId, bool readyForNext) =>
         _hubContext.Clients.Client(connectionId).ReceiveCycleCompletion(readyForNext);
 
-    // ✅ NEW: Frontend-specific simplified DTOs
     public Task SendFrontendSpeakerListAsync(string connectionId, FrontendSpeakerListUpdate speakerList) =>
         _hubContext.Clients.Client(connectionId).ReceiveFrontendSpeakerList(speakerList);
 
-    public Task SendFrontendConversationItemAsync(string connectionId, FrontendConversationItem conversationItem) =>
-        _hubContext.Clients.Client(connectionId).ReceiveFrontendConversationItem(conversationItem);
-
-    public Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk) =>
-        _hubContext.Clients.Client(connectionId).ReceiveFrontendTTSChunk(ttsChunk);
+    public Task SendFrontendConversationItemAsync(string connectionId, FrontendConversationItem item) =>
+        _hubContext.Clients.Client(connectionId).ReceiveFrontendConversationItem(item);
 
     public Task SendStructuredSummaryAsync(string connectionId, SessionSummaryDTO summary) =>
         _hubContext.Clients.Client(connectionId).ReceiveStructuredSummary(summary);

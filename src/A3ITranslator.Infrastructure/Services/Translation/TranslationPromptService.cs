@@ -23,139 +23,143 @@ public class TranslationPromptService : ITranslationPromptService
         _speakerService = speakerService;
     }
 
-    public async Task<(string systemPrompt, string userPrompt)> BuildTranslationPromptsAsync(EnhancedTranslationRequest request)
+
+
+    public async Task<(string systemPrompt, string userPrompt)> BuildAgent2PromptsAsync(EnhancedTranslationRequest request)
     {
-        var systemPrompt = BuildSystemPrompt(request.SourceLanguage, request.TargetLanguage, request.IsPulse);
-        var userPrompt = await BuildUserPromptAsync(request);
-        
-        _logger.LogDebug("Built {PromptType} translation prompts for {SourceLang} -> {TargetLang}",
-            request.IsPulse ? "PULSE" : "BRAIN", request.SourceLanguage, request.TargetLanguage);
-        
-        return (systemPrompt, userPrompt);
-    }
-
-    private string BuildSystemPrompt(string primaryLang, string secondaryLang, bool isPulse)
-    {
-        if (isPulse)
-        {
-            return $@"You are the **Fast Translation Pulse** for a real-time meeting assistant and specialized interpreter
-Your goal is to provide a clean, immediate, and speakable translation optimized for Text-to-Speech (TTS).
-**AUDIENCE CONSTRAINT**: All outputs must be in **simple, basic, day-to-day language** suitable for a low-educated audience. Use local variants/dialects if applicable to make it instantly understandable.
-
-**CORE RESPONSIBILITIES:**
-1. 🌐 **TRANSLATION**:
-   - Detect input Text language, but there is an expeced language.
-   - If {primaryLang} -> Translate to {secondaryLang}.
-   - If {secondaryLang} -> Translate to {primaryLang}.
-   - If detected language is unknown -> Translate to {primaryLang}.
-   - Content: Provide natural, distinct translations using SIMPLE, common words.
-   - Grammar: Fix stutters and improve basic structure.
-
-3. 🧠 **INTENT & AI ASSISTANCE**:
-   - **Intent**: 'SIMPLE_TRANSLATION' (Default) vs 'AI_ASSISTANCE' (User asks YOU for help).
-   - **Trigger**: Only specific calls like ""Assistant, who is...?"", ""Translator, what is...?"", or ""Fact check this..."". it could be an equilent word in primary or target language. like ""Assistant, who is..."" could be ""مترجم، کون ہے؟"" in urdu. 
-
-**STRICT JSON OUTPUT FORMAT**:
-{{
-  ""translation"": ""Target translation"",
-  ""intent"": ""SIMPLE_TRANSLATION"" | ""AI_ASSISTANCE"",
-  ""translationLanguage"": ""Target BCP-47""
-}}";
-}
-
-        return $@"You are the **Main Intelligence Core** for a sophisticated real-time meeting assistant and specialized interpreter.
-**AUDIENCE CONSTRAINT**: All outputs (Translation and AI Assistance) must be in **simple, basic, day-to-day language** suitable for a low-educated audience. Use local variants/dialects if applicable to make it instantly understandable.
-
-**OFFICIAL INPUT DATA STRUCTURE:**
-You will receive a user message containing:
-1. **Current Utterance**: The text to process.
-2. **Acoustic Scorecard**: Neural similarity scores (Cosine Similarity: -1 to 1) against known speakers.
-3. **Provisional ID**: The identity suggested by the live neural monitor (if a match was found early).
-4. **Speaker Roster**: Detailed profiles of known speakers (ID, Name, Role, Style, Language).
-5. **History**: The last 5 turns for context.
-6. **Significant Turns**: Important conversations that need to be remembered.
-7. **Expected Audio Language**: The language might be in the audio.
-8. **Acoustic/STT Confidence**: Reliability scores for the input audio and text.
-
-**YOUR CORE RESPONSIBILITIES (Execute in Order):**
-
-1. 🕵️ **ROSTER MANAGER (Priority #1)**:
-   - **Goal**: Maintain a clean, accurate list of speakers. Avoid 'Ghost Speakers' caused by noise.
-   - **Identity Decisions**:
-     - **CONFIRM_EXISTING**: Acoustic score is high (>0.80) AND context fits the history.
-     - **NEW_SPEAKER**: Acoustic scores are all low (<0.60) AND the context suggests a new participant.
-     - **MERGE**: If you detect a 'New Speaker' but their language/gender/context matches an existing speaker who has very few utterances (a 'Ghost'), you must **MERGE** them into that primary speaker to clean the history.
-   - **Strategy**: Trust the **Conversation Flow** (who was asked a question?) and **Social Roles** over weak acoustic signals.
-
-2. 🌐 **CONTEXTUAL TRANSLATION & ROUTING**:
-   - Detect the input language and leverage **History** and **Significant Turns** to understand hidden meaning or jargon.
+        var primaryLang = request.SourceLanguage;
+        var secondaryLang = request.TargetLanguage;
+        var systemPrompt = $@"You are the Intelligence Core Agent for a real-time meeting.
+**YOUR CORE RESPONSIBILITIES:**
+1. **CONTEXTUAL TRANSLATION & ROUTING**:
+   - Detect the input language and leverage **History** and **facts** to understand hidden meaning or jargon.
    - **Routing Rule**: 
      - If {primaryLang} -> Translate to {secondaryLang}.
      - If {secondaryLang} -> Translate to {primaryLang}.
      - Else -> Translate to {primaryLang}.
    - **Output**: Provide a translation that captures the **Contextual Nuance** and **Industry Specific Meaning**, BUT expressed in SIMPLE, everyday language. Pulse track handles literal meaning; YOU handle the deeper intent but keep the wording accessible.
 
-3. 🧠 **INTENT & AI ASSISTANCE**:
+2. **INTENT & AI ASSISTANCE**:
    - **Intent**: 'SIMPLE_TRANSLATION' (Default) vs 'AI_ASSISTANCE' (User asks YOU for help).
-   - **Trigger**: Only specific calls like ""Assistant, who is...?"", ""Translator, what is...?"", or ""Fact check this..."". it could be an equilent word in primary or target language. like ""Assistant, who is..."" could be ""مترجم، کون ہے؟"" in urdu. 
+   - **Trigger**: Only specific calls like, if the user explicitly addresses you , in any given language (expect accents and variations of the given language)(e.g. ""Assistant"", ""Smart Tolk"", ""Tolk"", ""اسسٹنٹ"", ""ٹولک"", ""اسسٹنٹ"", ""سمارٹ ٹولک"", ""ٹولک"") and asks a question meant for the AI.
    - **Action**: 
      - If triggered, you may use **Google Search Grounding** to find real-time info (e.g., current CEOs, weather, news, events, time).
      - **PERSONALIZATION**: Look at the **PROVISIONAL MATCH** in the Neural Evidence section.
        - If a name is provided (e.g., ""Farhan"", ""John"") and it is NOT Unknown, you MUST start your response by addressing them (e.g., ""Hello Farhan, ..."").
        - If the name is Unknown or no match exists, reply DIRECTLY to the query without any greeting.
-     - Provide a concise, helpful response in `aiAssistance` in the audio language and translated response in the target language. KEEP IT SIMPLE and easy to understand.
+     - Provide a concise, helpful response in `aiAssistance` in the transcription language and translated response in the target language. KEEP IT SIMPLE and easy to understand.
      - **DO NOT** use search for simple translations or pleasantries. Only for factual questions.
-
-4. 📝 **FACT MANAGER**:
-   - **Goal**: Maintain a dynamic list of facts about the speakers and conversation.
-   - **Source**: Extract facts directly from the 'Current Utterance' (e.g., ""My son Arez is 11 years old"" -> Key: ""Arez Age"", Value: ""11 years"" | Key: ""Son Name"", Value: ""Arez"").
-   - **Rules**:
-     - **English Only**: Keep keys and values in English.
-     - **New/Update Only**: ONLY return facts that are NEW or corrections to existing facts.
-     - **Weight/Correction**: If a fact corrects a previous one (e.g. correct name), use ""UPDATE"" or ""ADD"" to overwrite.
-     - **Deletions**: If a speaker is removed or a fact is explicitly revoked, use ""DELETE"".
-     - **Use Facts**: Use these facts to Refine Speaker Identification or inform your 'AI_ASSISTANCE' response.
-   - **Action**: Return a list of fact operations in `factExtraction`.
+    - If no assistance is requested, return `aiAssistance: null`.
+3. **ROSTER MANAGER (Priority #1)**:
+   - **Goal**: Maintain a clean, accurate list of speakers. Avoid 'Ghost Speakers' caused by noise.
+   - **Identity Decisions**:
+     - **CONFIRM_EXISTING**: Acoustic score is high (>0.80) AND context fits the history.
+     - **NEW_SPEAKER**: Acoustic scores are all low (<0.60) AND the context suggests a new participant.
+     - **MERGE**: If you detect a 'New Speaker' but their language/gender/context matches an existing speaker who has very few utterances (a 'Ghost'), you must **MERGE** them into that primary speaker to clean the history.
+     - **EXPLICIT CORRECTION**: If the speaker deliberately spells out their name or explicitly corrects their name, update their `displayName` and set `""isNameExplicitlyCorrected"": true` so the backend can override locks.
+   - **Strategy**: Trust the **Conversation Flow** (who was asked a question?) and **Social Roles** over weak acoustic signals.
 
 **STRICT JSON OUTPUT FORMAT**:
 ```json
 {{
-  ""improvedTranscription"": ""Cleaned text in native script. Keep this simple; the Pulse track already provided the baseline."",
-  ""translation"": ""DEEP CONTEXTUAL translation that accounts for speaker roles, jargon, and previous turns. Capture the 'true meaning' over literal words."",
-  ""intent"": ""SIMPLE_TRANSLATION"" | ""AI_ASSISTANCE"",
+  ""improvedTranscription"": ""Cleaned text removing stutters and fillers"",
+  ""translation"": ""Deep contextual translation accounting for roles, history, and jargon"",
   ""estimatedGender"": ""Male"" | ""Female"" | ""Unknown"",
-  ""translationLanguage"": ""Target BCP-47"",
-  ""audioLanguage"": ""Detected Source BCP-47"",
   ""confidence"": 0.98,
   
+  ""aiAssistance"": {{
+     ""triggerDetected"": true,
+     ""response"": ""Your helpful AI answer based on facts/history"",
+     ""responseTranslated"": ""Translated AI response"",
+     ""confidence"": 0.98
+  }},
+
   ""turnAnalysis"": {{
     ""activeSpeakerId"": ""speaker_1"",
     ""identificationConfidence"": 0.98,
     ""decisionType"": ""CONFIRMED"" | ""NEW"" | ""MERGE"",
-    ""mergeDetails"": {{
-      ""ghostIdToRemove"": ""speaker_7"", 
-      ""targetIdToKeep"": ""speaker_1""
-    }}
+    ""mergeDetails"": {{ ""ghostIdToRemove"": ""speaker_7"", ""targetIdToKeep"": ""speaker_1"" }}
   }},
-
+  
   ""sessionRoster"": [
-    {{
+     {{
       ""speakerId"": ""speaker_1"",
       ""displayName"": ""Farhan"",
       ""socialRole"": ""Interviewer"" | ""Doctor"" | ""Client"" | ""Host"",
       ""estimatedGender"": ""Male"" | ""Female"" | ""Unknown"",
       ""preferredLanguage"": ""ur-PK"",
       ""tone"": ""formal"" | ""casual"",
-      ""isLocked"": true 
+      ""isLocked"": true,
+      ""isNameExplicitlyCorrected"": false
     }}
-  ],
+  ]
+}}
+```";
+        
+        var prompt = new StringBuilder();
+        prompt.AppendLine($"### CURRENT UTTERANCE:");
+        prompt.AppendLine($"**Transcription:** \"{request.Text}\"");
+        prompt.AppendLine();
 
-  ""aiAssistance"": {{
-    ""triggerDetected"": true | false,
-    ""response"": ""Your helpful answer, it may be from facts, previous turns, context, model (generic), specific internet lookup for realtime info"",
-    ""responseTranslated"": ""Translated AI response"",
-    ""confidence"": 0.98
-  }},
+        string sessionId = request.SessionId;
+        bool hasSession = !string.IsNullOrWhiteSpace(sessionId) && sessionId != "unknown";
+
+        if (hasSession)
+        {
+            var speakerContext = await _speakerService.BuildSpeakerPromptContextAsync(sessionId);
+            prompt.AppendLine("### 📋 CURRENT SPEAKER ROSTER:");
+            if (string.IsNullOrWhiteSpace(speakerContext) || speakerContext == "None.") prompt.AppendLine("- No participants identified yet.");
+            else prompt.AppendLine(speakerContext);
+            prompt.AppendLine();
+        }
+
+        if (request.SessionContext != null)
+        {
+            if (request.SessionContext.TryGetValue("provisionalId", out var provId) && provId != null)
+            {
+                var provName = request.SessionContext.TryGetValue("provisionalName", out var name) ? name : "Unknown";
+                prompt.AppendLine("### 🧬 NEURAL PROVISIONAL EVIDENCE:");
+                prompt.AppendLine($"- **PROVISIONAL MATCH**: The live monitor suggested **{provName}** ({provId}). Use this to greet the user if providing AI Assistance.");
+                prompt.AppendLine();
+            }
+            if (request.SessionContext.TryGetValue("expectedLanguageCode", out var expectedLang)) prompt.AppendLine($"**Expected Audio Language Hint:** {expectedLang}\n");
+            
+            if (request.SessionContext.TryGetValue("speakerScorecard", out var scorecardObj) && scorecardObj is List<SpeakerComparisonResult> scorecard && scorecard.Count > 0)
+            {
+                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD (Neural Similarity):");
+                foreach (var score in scorecard.Take(5)) prompt.AppendLine($"- **{score.DisplayName}** ({score.SpeakerId}): {score.SimilarityScore:F4} Cosine");
+                prompt.AppendLine();
+            }
+
+            if (request.SessionContext.TryGetValue("facts", out var factsObj) && factsObj is List<FactItem> facts && facts.Count > 0)
+            {
+                prompt.AppendLine("### 🧩 KNOWN FACTS (Use for AI Assistance):");
+                foreach (var fact in facts) prompt.AppendLine($"- **{fact.Key}**: {fact.Value}");
+                prompt.AppendLine();
+            }
+
+            if (request.SessionContext.TryGetValue("recentHistory", out var historyObj) && historyObj is List<ConversationHistoryItem> history && history.Count > 0)
+            {
+                prompt.AppendLine("### 📜 RECENT CONVERSATION (Use for AI Assistance & Speaker ID):");
+                foreach (var item in history) prompt.AppendLine($"- {item.SpeakerName}: \"{item.Text}\"");
+                prompt.AppendLine();
+            }
+        }
+        return (systemPrompt, prompt.ToString());
+    }
+
+    public Task<(string systemPrompt, string userPrompt)> BuildAgent3PromptsAsync(EnhancedTranslationRequest request)
+    {
+        var systemPrompt = $@"You are the Background Librarian (Fact Manager) for a meeting.
+**YOUR CORE RESPONSIBILITIES:**
+1. **FACT MANAGER**:
+   - Extract facts directly from the 'Current Utterance'.
+   - Keep keys and values in English. Use operations ADD, UPDATE, or DELETE.
+   - use first 5-10 sentences to setup meeting context, by adding speakers, purpose of the meeting and are where it belongs and all important metadata about meeting
+
+**STRICT JSON OUTPUT FORMAT**:
+```json
+{{
   ""factExtraction"": {{
     ""facts"": [
       {{
@@ -167,145 +171,38 @@ You will receive a user message containing:
   }}
 }}
 ```";
-    }
-
-    private async Task<string> BuildUserPromptAsync(EnhancedTranslationRequest request)
-    {
-        var prompt = new StringBuilder();
         
+        var prompt = new StringBuilder();
         prompt.AppendLine($"### CURRENT UTTERANCE:");
         prompt.AppendLine($"**Transcription:** \"{request.Text}\"");
+        prompt.AppendLine($"**Estimated Transcription Language (STT Winner):** {request.SourceLanguage}");
         prompt.AppendLine();
 
-        if (request.IsPulse)
-        {
-            prompt.AppendLine("### 📋 SUMMARY CONTEXT:");
-            if (request.SessionContext != null && request.SessionContext.TryGetValue("summary", out var summary))
-                prompt.AppendLine(summary.ToString());
-            else
-                prompt.AppendLine("No summary available yet.");
-                
-            if (request.SessionContext != null && request.SessionContext.TryGetValue("recentHistory", out var historyObj) 
-                && historyObj is List<ConversationHistoryItem> history && history.Count > 0)
-            {
-                prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY (Last 5 Turns):");
-                foreach (var item in history)
-                {
-                    prompt.AppendLine($"- **{item.SpeakerName}** ({item.SpeakerId}): \"{item.Text}\"");
-                }
-                prompt.AppendLine();
-            }
-            
-            // 🚀 NEW: Expected Language Hint (from dual-STT selection)
-            if (request.SessionContext.TryGetValue("expectedLanguageCode", out var expectedLang))
-            {
-                prompt.AppendLine($"**Expected Audio Language Hint:** {expectedLang}");
-                prompt.AppendLine();
-            }
-
-            prompt.AppendLine("### ANALYSIS INSTRUCTIONS:");
-            prompt.AppendLine("1. **Translate** accurately for TTS (ensure it flows naturally when spoken).");
-            prompt.AppendLine("2. **Detect Intent**: Is the user talking to a human or the AI?");
-            prompt.AppendLine("3. **Gender Estimation**: Provide the speaker's likely gender for better voice selection.");
-            prompt.AppendLine("4. **Output**: Return lean JSON only.");
-            return prompt.ToString();
-        }
-
-        string sessionId = request.SessionId;
-        bool hasSession = !string.IsNullOrWhiteSpace(sessionId) && sessionId != "unknown";
-
-        // 🚀 CLEAN: Add Neural Speaker Roster context
-        if (hasSession)
-        {
-            var speakerContext = await _speakerService.BuildSpeakerPromptContextAsync(sessionId);
-            prompt.AppendLine("### 📋 CURRENT SPEAKER ROSTER (Known Participants):");
-            if (string.IsNullOrWhiteSpace(speakerContext) || speakerContext == "None.")
-                prompt.AppendLine("- No participants identified yet.");
-            else
-                prompt.AppendLine(speakerContext);
-            prompt.AppendLine();
-        }
-
-        // Add acoustic signal if available
         if (request.SessionContext != null)
         {
-            // 🚀 NEW: Render Neural Provisional Evidence (What we heard during the stream)
             if (request.SessionContext.TryGetValue("provisionalId", out var provId) && provId != null)
             {
                 var provName = request.SessionContext.TryGetValue("provisionalName", out var name) ? name : "Unknown";
                 prompt.AppendLine("### 🧬 NEURAL PROVISIONAL EVIDENCE:");
-                prompt.AppendLine($"- **PROVISIONAL MATCH**: The live monitor suggested **{provName}** ({provId})");
+                prompt.AppendLine($"- **PROVISIONAL MATCH**: The live monitor suggested **{provName}** ({provId}). Use this information for fact extraction context if relevant.");
                 prompt.AppendLine();
             }
 
-            // 🚀 NEW: Expected Language Hint (from dual-STT selection)
-            if (request.SessionContext.TryGetValue("expectedLanguageCode", out var expectedLang))
+            if (request.SessionContext.TryGetValue("facts", out var factsObj) && factsObj is List<FactItem> facts && facts.Count > 0)
             {
-                prompt.AppendLine($"**Expected Audio Language Hint:** {expectedLang}");
+                prompt.AppendLine("### 🧩 KNOWN FACTS:");
+                foreach (var fact in facts) prompt.AppendLine($"- **{fact.Key}**: {fact.Value}");
                 prompt.AppendLine();
             }
 
-            // 🚀 NEW: Render the Neural Scorecard
-            if (request.SessionContext.TryGetValue("speakerScorecard", out var scorecardObj) 
-                && scorecardObj is List<SpeakerComparisonResult> scorecard && scorecard.Count > 0)
-            {
-                prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD (Neural Similarity):");
-                foreach (var score in scorecard.Take(5))
-                {
-                    prompt.AppendLine($"- **{score.DisplayName}** ({score.SpeakerId}): {score.SimilarityScore:F4} Cosine Similarity");
-                }
-            }
-            else
-            {
-               prompt.AppendLine("### 🎯 ACOUSTIC SCORECARD:");
-               prompt.AppendLine("No strong neural matches found (Possibly a new speaker).");
-            }
-            
-            // 🚀 NEW: Confidence Scores (Hints for refinement)
-            prompt.AppendLine("### 📊 INPUT RELIABILITY:");
-            prompt.AppendLine($"- **Transcription Confidence**: {(request.SessionContext.TryGetValue("transcriptionConfidence", out var tc) ? (float)tc : 0f):P0}");
-            prompt.AppendLine($"- **Speaker Matching Confidence**: {(request.SessionContext.TryGetValue("speakerConfidence", out var sc) ? (float)sc : 0f):P0}");
-            prompt.AppendLine();
-
-            // 🚀 CONTEXT: Last 5 turns for flow analysis
-            if (request.SessionContext.TryGetValue("recentHistory", out var historyObj) 
-                && historyObj is List<ConversationHistoryItem> history && history.Count > 0)
+            if (request.SessionContext.TryGetValue("recentHistory", out var historyObj) && historyObj is List<ConversationHistoryItem> history && history.Count > 0)
             {
                 prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY (Last 5 Turns):");
-                foreach (var item in history)
-                {
-                    prompt.AppendLine($"- **{item.SpeakerName}** ({item.SpeakerId}): \"{item.Text}\"");
-                }
+                foreach (var item in history) prompt.AppendLine($"- **{item.SpeakerName}**: \"{item.Text}\"");
             }
-            else
-            {
-                prompt.AppendLine("### 📜 RECENT CONVERSATION HISTORY:");
-                prompt.AppendLine("No previous history available.");
-            }
-
-            // 🚀 NEW: Fact Manager List (Context for AI)
-            if (request.SessionContext.TryGetValue("facts", out var factsObj) 
-                && factsObj is List<FactItem> facts && facts.Count > 0)
-            {
-                prompt.AppendLine("### 🧩 KNOWN FACTS (Context for Logic/Response):");
-                foreach (var fact in facts)
-                {
-                    prompt.AppendLine($"- **{fact.Key}**: {fact.Value}");
-                }
-            }
-            prompt.AppendLine();
         }
         
-        prompt.AppendLine("### ANALYSIS INSTRUCTIONS:");
-        prompt.AppendLine("1. **Language Detection**: Identify source language and apply routing rules");
-        prompt.AppendLine("2. Use the **Neural Evidence** as a guide, but let the **Conversation History** be the final tie-breaker.");
-        prompt.AppendLine("3. If this speaker matches an existing profile but the score is low due to audio quality, use **CONFIRM_EXISTING** if the context is 100% certain.");
-        prompt.AppendLine("4. If this utterance belongs to a speaker you previously identified incorrectly, use the **MERGE** decision to fix it.");
-        prompt.AppendLine("5. **Translation**: Provide natural translation with proper target language");
-        prompt.AppendLine("6. **Fact Manager**: Extract NEW facts or Update existing ones based on this utterance.");
-        prompt.AppendLine("7. **Output**: Return complete JSON response with all analysis");
-        
-        return prompt.ToString();
+        return Task.FromResult((systemPrompt, prompt.ToString()));
     }
 
     public Task<(string systemPrompt, string userPrompt)> BuildNativeSummaryPromptsAsync(

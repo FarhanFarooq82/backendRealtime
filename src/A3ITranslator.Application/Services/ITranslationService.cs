@@ -5,7 +5,6 @@ namespace A3ITranslator.Application.Services;
 
 public interface ITranslationService
 {
-    Task<EnhancedTranslationResponse> ProcessTranslationAsync(string sessionId, UtteranceWithContext utterance, string? lastSpeakerId, string? provisionalSpeakerId, string? provisionalDisplayName, string turnId,
-        bool isPulse,
+    Task<EnhancedTranslationRequest> CreateTranslationRequestAsync(string sessionId, UtteranceWithContext utterance, string? lastSpeakerId, string? provisionalSpeakerId, string? provisionalDisplayName, string turnId,
         bool isPremium = true);
 }

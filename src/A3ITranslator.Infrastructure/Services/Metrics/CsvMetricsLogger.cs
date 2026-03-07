@@ -39,7 +39,7 @@ public class CsvMetricsLogger : IMetricsService
             // Initialize Usage Metrics File
             if (!File.Exists(_usageLogPath))
             {
-                var header = "Timestamp,SessionId,ConnectionId,Category,Provider,Operation,Model,InputUnits,InputUnitType,OutputUnits,OutputUnitType,AudioLengthSec,CostUSD,LatencyMs,Status,ErrorMessage,TurnId,Track,VoiceUsed";
+                var header = "Timestamp,SessionId,ConnectionId,Category,Provider,Operation,Model,InputUnits,InputUnitType,OutputUnits,OutputUnitType,AudioLengthSec,CostUSD,LatencyMs,Status,ErrorMessage,TurnId,Track,VoiceUsed,StartTime,EndTime";
                 File.WriteAllText(_usageLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created usage log at: {_usageLogPath}");
             }
@@ -72,7 +72,7 @@ public class CsvMetricsLogger : IMetricsService
         try
         {
             // 1. Append to Usage Metrics (Numbers/Metadata)
-            var usageLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11:F4},{12:F6},{13},{14},{15},{16},{17},{18}",
+            var usageLine = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11:F4},{12:F6},{13},{14},{15},{16},{17},{18},{19},{20}",
                 metrics.Timestamp,
                 EscapeCsv(metrics.SessionId),
                 EscapeCsv(metrics.ConnectionId),
@@ -91,7 +91,9 @@ public class CsvMetricsLogger : IMetricsService
                 EscapeCsv(metrics.ErrorMessage),
                 EscapeCsv(metrics.TurnId),
                 EscapeCsv(metrics.Track),
-                EscapeCsv(metrics.VoiceUsed));
+                EscapeCsv(metrics.VoiceUsed),
+                metrics.StartTime?.ToString("yyyy-MM-dd HH:mm:ss.fff") ?? "",
+                metrics.EndTime?.ToString("yyyy-MM-dd HH:mm:ss.fff") ?? "");
 
             await File.AppendAllTextAsync(_usageLogPath, usageLine + Environment.NewLine, Encoding.UTF8);
 

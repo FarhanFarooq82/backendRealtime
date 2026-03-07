@@ -14,21 +14,11 @@ public interface IRealtimeNotificationService
 {
     Task NotifyTranscriptionAsync(string connectionId, string text, string language, bool isFinal);
     Task NotifyErrorAsync(string connectionId, string message);
-    Task NotifyAudioChunkAsync(string connectionId, byte[] audioChunk);
-    Task NotifyTranslationAsync(string connectionId, string text, string language, bool isFinal);
-    Task NotifyTransactionCompleteAsync(string connectionId);
-
-
     // ✅ NEW: Processing state updates
     /// <summary>
     /// Update processing status (e.g., "Generating response...", "Preparing speech...")
     /// </summary>
     Task NotifyProcessingStatusAsync(string connectionId, string status);
-
-    /// <summary>
-    /// Notify processing error - keeps session active for retry
-    /// </summary>
-    Task NotifyProcessingErrorAsync(string connectionId, string errorMessage);
 
 
     /// <summary>
@@ -49,15 +39,9 @@ public interface IRealtimeNotificationService
     Task SendFrontendSpeakerListAsync(string connectionId, FrontendSpeakerListUpdate speakerList);
 
     /// <summary>
-    /// Send conversation item with essential frontend data
-    /// Reusable method for translation and AI responses
+    /// Send the final conversation UI bubble explicitly meant for the frontend display
     /// </summary>
-    Task SendFrontendConversationItemAsync(string connectionId, FrontendConversationItem conversationItem);
-
-    /// <summary>
-    /// Send TTS audio chunk for frontend playback
-    /// </summary>
-    Task SendFrontendTTSChunkAsync(string connectionId, FrontendTTSChunk ttsChunk);
+    Task SendFrontendConversationItemAsync(string connectionId, FrontendConversationItem item);
 
     /// <summary>
     /// Send structured bilingual summary with RTL support and metadata

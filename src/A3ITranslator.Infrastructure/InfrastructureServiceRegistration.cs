@@ -59,9 +59,10 @@ public static class InfrastructureServiceRegistration
             return new GenAIOrchestrator(logger, options, providers);
         });
         
-        // Add HttpClient for Gemini and OpenAI
+        // Add HttpClient for Gemini and OpenAI and AzureTextTranslator
         services.AddHttpClient("GeminiClient");
         services.AddHttpClient("OpenAIClient");
+        services.AddHttpClient<IAzureTextTranslatorService, AzureTextTranslatorService>();
 
         // ✅ TTS Services
         services.AddSingleton<ISpeakerVoiceAssignmentService, AzureSpeakerVoiceAssignmentService>();

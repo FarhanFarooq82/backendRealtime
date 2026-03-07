@@ -15,6 +15,10 @@ public class AzureOptions
     
     [Required]
     public string SpeechRegion { get; set; } = string.Empty;
+
+    // Optional: Dedicated keys for Azure Translator (if not using a multi-service Cognitive Services resource)
+    public string TranslatorKey { get; set; } = string.Empty;
+    public string TranslatorRegion { get; set; } = string.Empty;
     
     public string SpeechEndpoint { get; set; } = string.Empty;
 

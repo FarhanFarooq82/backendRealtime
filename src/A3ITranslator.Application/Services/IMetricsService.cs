@@ -34,6 +34,8 @@ public class UsageMetrics
     public string TurnId { get; set; } = string.Empty;
     public string Track { get; set; } = string.Empty; // "Pulse" or "Brain"
     public string VoiceUsed { get; set; } = string.Empty;
+    public DateTime? StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
 }
 
 public class CycleMetrics
