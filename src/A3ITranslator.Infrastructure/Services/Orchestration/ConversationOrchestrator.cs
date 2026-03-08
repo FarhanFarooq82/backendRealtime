@@ -674,14 +674,14 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 }
             });
 
-            // 4. AWAIT AGENT 2 (SUPER AGENT) TO COMPLETE THE CYCLE
+            // 4. PREPARE DETACHED BACKGROUND PROCESSING
             // We lock the cycle (microphone) until Agent 2 decides if AI Assistance is required, 
             // and generates the corresponding conversation items.
-            await _notificationService.NotifyProcessingStatusAsync(connectionId, "🧠 Tolk is thinking...");
 
             // 5. TTS ROUTING AND DETACHED BACKGROUND PROCESSING
             Func<Task> processAgent2BackgroundAsync = async () =>
             {
+                bool cycleUnblocked = false;
                 try
                 {
                     var agent2ResponseRaw = await agent2Task;
@@ -731,6 +731,20 @@ public class ConversationOrchestrator : IConversationOrchestrator
                         intentStr = "AI_ASSISTANCE";
                     }
 
+                    // UNBLOCK or Notify based on intent
+                    if (intentStr == "SIMPLE_TRANSLATION")
+                    {
+                        // Immediate unblock for simple translation
+                        await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
+                        state.ResetCycle();
+                        cycleUnblocked = true;
+                    }
+                    else
+                    {
+                        // Signal AI is thinking while we process AI audio
+                        await _notificationService.NotifyProcessingStatusAsync(connectionId, "🧠 Tolk is thinking...");
+                    }
+
                     // 7. Resolve Final Responses
                     string? aiAssistanceResponse = null;
                     if (intentStr == "AI_ASSISTANCE" && agent2Data.AIAssistance != null)
@@ -739,18 +753,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                             ? agent2Data.AIAssistance.ResponseTranslated 
                             : agent2Data.AIAssistance.Response;
                         
-                        // Fire AI Assistance Audio
-                        var aiAudioResponse = new EnhancedTranslationResponse 
-                        { 
-                            Translation = aiAssistanceResponse ?? mntTranslation, // Fallback if AI empty
-                            TranslationLanguage = fastResponse.TranslationLanguage,
-                            Intent = "AI_ASSISTANCE" 
-                        };
-                        
-                        _logger.LogInformation("⚡ {TurnId}: Heavy-Context TTS: Firing AI Contextual Assistant audio.", turnId);
-                        
-                        // AWAIT the AI audio to finish playing if we are in AI mode BEFORE unlocking mic
-                        await _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.ProvisionalSpeakerId ?? state.LastSpeakerId, aiAudioResponse);
+                        _logger.LogInformation("⚡ {TurnId}: Heavy-Context: Preparing AI Contextual Assistant audio for SendResponseAsync.", turnId);
                     }
 
                     // The main visual element uses Super Agent 2 data (No MNT Merge needed for UI text)
@@ -781,15 +784,20 @@ public class ConversationOrchestrator : IConversationOrchestrator
                     await _responseService.SendResponseAsync(connectionId, state.SessionId!, speakerResult.SpeakerId, utteranceWithContext, baseResponse, speakerResult);
                         
                     // 7. SHIP ADDITIONAL RESPONSE (AI Assistance - Offset by 100ms)
-                    if (aiAssistanceResponse != null)
+                    if (intentStr == "AI_ASSISTANCE" && agent2Data.AIAssistance != null)
                     {
+                        string aiAssistanceResponseTranslated = !string.IsNullOrWhiteSpace(agent2Data.AIAssistance.ResponseTranslated) 
+                            ? agent2Data.AIAssistance.ResponseTranslated 
+                            : agent2Data.AIAssistance.Response ?? mntTranslation;
+
                         var aiResponseForUI = new EnhancedTranslationResponse
                         {
-                            ImprovedTranscription = agent2Data.AIAssistance?.Response ?? "",
-                            Translation = aiAssistanceResponse,
+                            ImprovedTranscription = agent2Data.AIAssistance.Response ?? "",
+                            Translation = aiAssistanceResponseTranslated,
                             Intent = "AI_ASSISTANCE",
                             TranslationLanguage = baseResponse.TranslationLanguage,
                             AudioLanguage = baseResponse.AudioLanguage,
+                            AIAssistance = agent2Data.AIAssistance, // Crucial for ConversationResponseService to handle AI audio correctly
                             EstimatedGender = "Unknown",
                             Confidence = 1.0f
                         };
@@ -819,46 +827,34 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 {
                     _logger.LogError(ex, "❌ {TurnId}: Error in detached Agent 2 processing: {Message}", turnId, ex.Message);
                 }
-
-                try
+                finally
                 {
-                    // 8. UNBLOCK: Agent 2 is completely finished. Now allow next cycle.
-                    await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
-                    state.ResetCycle();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "❌ {TurnId}: Error unlocking cycle. {Message}", turnId, ex.Message);
+                    try
+                    {
+                        // 8. UNBLOCK: If intent was AI_ASSISTANCE, Agent 2 is completely finished. Now allow next cycle.
+                        // For SIMPLE_TRANSLATION, we already unblocked earlier.
+                        if (!cycleUnblocked)
+                        {
+                            await _notificationService.NotifyCycleCompletionAsync(connectionId, true);
+                            state.ResetCycle();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "❌ {TurnId}: Error unlocking cycle. {Message}", turnId, ex.Message);
+                    }
                 }
             };
 
         // 6. ASYNC EXECUTION SPLIT
-        if (fastResponse.Intent == "AI_ASSISTANCE")
-        {
-            _logger.LogInformation("🧠 {TurnId}: User requested AI Assistance. Detaching Agent 2...", turnId);
-            
-            _ = Task.Run(async () => {
-                try {
-                    await _notificationService.NotifyProcessingStatusAsync(connectionId, "🧠 Tolk is thinking...");
-                    await processAgent2BackgroundAsync();
-                } catch (Exception ex) {
-                    _logger.LogError(ex, "Background AI task failed.");
-                }
-            });
-        }
-        else
-        {
-            _logger.LogInformation("⚡ Fast-Twitch TTS (Azure MNT): Firing instant translation audio in background.");
-            
-            _ = Task.Run(async () => {
-                try {
-                    await _responseService.SendPulseAudioOnlyAsync(connectionId, state.SessionId!, state.ProvisionalSpeakerId ?? state.LastSpeakerId, fastResponse);
-                    await processAgent2BackgroundAsync();
-                } catch (Exception ex) {
-                    _logger.LogError(ex, "Background TTS task failed.");
-                }
-            });
-        }
+        _logger.LogInformation("🚀 Launching Agent 2 processor in background.");
+        _ = Task.Run(async () => {
+            try {
+                await processAgent2BackgroundAsync();
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Background Agent 2 task failed.");
+            }
+        });
 
     }
     catch (Exception ex)
