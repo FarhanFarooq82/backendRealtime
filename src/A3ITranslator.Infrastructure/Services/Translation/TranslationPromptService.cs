@@ -25,6 +25,23 @@ public class TranslationPromptService : ITranslationPromptService
 
 
 
+    public Task<(string systemPrompt, string userPrompt)> BuildFastIntentPromptsAsync(string transcription)
+    {
+        var systemPrompt = @"You are an ultra-fast intent router.
+**YOUR ONLY RESPONSIBILITY:**
+Determine if the user is explicitly addressing the AI assistant to ask a question or request help.
+Triggers include names like: ""Assistant"", ""Smart Tolk"", ""Tolk"", ""AI"", ""اسسٹنٹ"", ""ٹولک"", ""سمارٹ ٹولک"".
+If the user is just talking normally, return false.
+If the user is asking the AI a factual question, return true.
+
+**STRICT OUTPUT FORMAT:**
+Respond with EXACTLY the word ""true"" or ""false"". No other text.";
+
+        var userPrompt = $"**Transcription:** \"{transcription}\"";
+
+        return Task.FromResult((systemPrompt, userPrompt));
+    }
+
     public async Task<(string systemPrompt, string userPrompt)> BuildAgent2PromptsAsync(EnhancedTranslationRequest request)
     {
         var primaryLang = request.SourceLanguage;
@@ -49,15 +66,14 @@ public class TranslationPromptService : ITranslationPromptService
        - If the name is Unknown or no match exists, reply DIRECTLY to the query without any greeting.
      - Provide a concise, helpful response in `aiAssistance` in the transcription language and translated response in the target language. KEEP IT SIMPLE and easy to understand.
      - **DO NOT** use search for simple translations or pleasantries. Only for factual questions.
-    - If no assistance is requested, return `aiAssistance: null`.
 3. **ROSTER MANAGER (Priority #1)**:
    - **Goal**: Maintain a clean, accurate list of speakers. Avoid 'Ghost Speakers' caused by noise.
    - **Identity Decisions**:
      - **CONFIRM_EXISTING**: Acoustic score is high (>0.80) AND context fits the history.
      - **NEW_SPEAKER**: Acoustic scores are all low (<0.60) AND the context suggests a new participant.
      - **MERGE**: If you detect a 'New Speaker' but their language/gender/context matches an existing speaker who has very few utterances (a 'Ghost'), you must **MERGE** them into that primary speaker to clean the history.
-     - **EXPLICIT CORRECTION**: If the speaker deliberately spells out their name or explicitly corrects their name, update their `displayName` and set `""isNameExplicitlyCorrected"": true` so the backend can override locks.
-   - **Strategy**: Trust the **Conversation Flow** (who was asked a question?) and **Social Roles** over weak acoustic signals.
+   - **Strategy**: Trust the **Conversation Flow** (who was asked a question?) and **Social Roles** over weak acoustic signals. DO NOT trust the PROVISIONAL MATCH if the text explicitly indicates a new speaker introducing themselves or a clear change in dialogue flow.
+   - **Linguistic Clues**: Pay extremely close attention to the **Vocabulary**, **Tone**, and **Preferred Language** of the speaker. **CRITICAL: If the language of the current utterance changes compared to the previous turn, strongly expect a DIFFERENT speaker.** **HOWEVER**, be highly aware of **Code-Switching**. If the speaker is known to speak {primaryLang} but throws in common phrases from {secondaryLang} (e.g., an Urdu speaker using English terms), DO NOT flag them as a new speaker. Look at the flow of the conversation over strict language boundaries. If the current transcript heavily uses technical industry jargon matching Speaker A, but acoustic scores are weak, trust the vocabulary and assign it to Speaker A.
 
 **STRICT JSON OUTPUT FORMAT**:
 ```json

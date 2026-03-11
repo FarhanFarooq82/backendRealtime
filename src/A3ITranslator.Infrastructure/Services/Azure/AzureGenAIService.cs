@@ -58,7 +58,7 @@ public class AzureGenAIService : IGenAIService
         }
     }
 
-    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false)
+    public async Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false, string? preferredProvider = null)
     {
         try
         {

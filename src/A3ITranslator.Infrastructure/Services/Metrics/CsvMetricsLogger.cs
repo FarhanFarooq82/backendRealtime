@@ -13,6 +13,7 @@ public class CsvMetricsLogger : IMetricsService
     private readonly string _usageLogPath;
     private readonly string _promptLogPath;
     private readonly string _cycleLogPath;
+    private readonly string _transitionLogPath;
     private readonly SemaphoreSlim _fileLock = new SemaphoreSlim(1, 1);
     private readonly ILogger<CsvMetricsLogger> _logger;
 
@@ -23,6 +24,7 @@ public class CsvMetricsLogger : IMetricsService
         _usageLogPath = Path.Combine(baseDir, "usage_metrics.csv");
         _promptLogPath = Path.Combine(baseDir, "prompt_history.csv");
         _cycleLogPath = Path.Combine(baseDir, "cycle_metrics.csv");
+        _transitionLogPath = Path.Combine(baseDir, "transitions.csv");
         InitializeLogFiles();
     }
 
@@ -58,6 +60,14 @@ public class CsvMetricsLogger : IMetricsService
                 var header = "Timestamp,SessionId,ConnectionId,CycleStartTime,VADTriggerTime,GenAIStartTime,GenAIEndTime,CycleEndTime,ConversationItemSentTime,AudioDurationSec,STTCost,GenAICost,TTSCost,TotalCost,GenAILatencyMs,ImprovedTranscription,Translation";
                 File.WriteAllText(_cycleLogPath, header + Environment.NewLine, Encoding.UTF8);
                 Console.WriteLine($"✅ METRICS: Created cycle log at: {_cycleLogPath}");
+            }
+
+            // Initialize Transition File
+            if (!File.Exists(_transitionLogPath))
+            {
+                var header = "Timestamp,SessionId,ConnectionId,TurnId,EventType,Details";
+                File.WriteAllText(_transitionLogPath, header + Environment.NewLine, Encoding.UTF8);
+                Console.WriteLine($"✅ METRICS: Created transition log at: {_transitionLogPath}");
             }
         }
         catch (Exception ex)
@@ -156,6 +166,31 @@ public class CsvMetricsLogger : IMetricsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to write cycle metrics to CSV");
+        }
+        finally
+        {
+            _fileLock.Release();
+        }
+    }
+
+    public async Task LogTransitionAsync(TransitionMetrics metrics)
+    {
+        await _fileLock.WaitAsync();
+        try
+        {
+            var line = string.Format("{0:yyyy-MM-dd HH:mm:ss.fff},{1},{2},{3},{4},{5}",
+                metrics.Timestamp,
+                EscapeCsv(metrics.SessionId),
+                EscapeCsv(metrics.ConnectionId),
+                EscapeCsv(metrics.TurnId),
+                EscapeCsv(metrics.EventType),
+                EscapeCsv(metrics.Details));
+
+            await File.AppendAllTextAsync(_transitionLogPath, line + Environment.NewLine, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write transition metrics to CSV");
         }
         finally
         {

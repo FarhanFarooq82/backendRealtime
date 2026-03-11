@@ -48,7 +48,7 @@ public class TranslationService : ITranslationService
         {
             // Both tracks now get recent history for better context
             recentHistory = session.ConversationHistory
-                .TakeLast(5)
+                .TakeLast(10)
                 .Select(t => new ConversationHistoryItem 
                 { 
                     SpeakerId = t.SpeakerId, 

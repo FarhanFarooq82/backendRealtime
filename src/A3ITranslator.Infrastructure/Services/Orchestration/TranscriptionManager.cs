@@ -242,12 +242,20 @@ internal class LanguageSpecificUtteranceManager
         {
             var confidence = GetConfidence();
             var text = GetBestText();
+            var duration = GetTotalDurationSeconds();
+            
+            // Dynamic thresholds based on duration
+            float targetThreshold = WINNER_CONFIDENCE_THRESHOLD;
+            if (duration < 2.0) targetThreshold = 0.85f; // Extremely strict early on
+            else if (duration < 5.0) targetThreshold = 0.75f; // Medium strictness
+            else targetThreshold = 0.65f; // Relaxed for long utterances
+
             var hasFinalText = _finalUtterances.Any() && _finalUtterances.Sum(u => u.Length) >= WINNER_MIN_TEXT_LENGTH;
             var hasGoodInterim = !string.IsNullOrWhiteSpace(_currentInterim) && 
                                 _currentInterim.Length >= WINNER_MIN_TEXT_LENGTH && 
-                                confidence >= WINNER_CONFIDENCE_THRESHOLD + 0.1f;
+                                confidence >= targetThreshold + 0.1f;
             
-            return confidence >= WINNER_CONFIDENCE_THRESHOLD && 
+            return confidence >= targetThreshold && 
                    text.Length >= WINNER_MIN_TEXT_LENGTH &&
                    (hasFinalText || hasGoodInterim);
         }

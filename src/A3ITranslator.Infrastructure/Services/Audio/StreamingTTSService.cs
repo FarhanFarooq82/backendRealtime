@@ -92,6 +92,10 @@ public class StreamingTTSService : IStreamingTTSService
                 
                 _logger.LogDebug("🔊 Azure TTS: Streaming {TotalChunks} chunks", totalChunks);
 
+                // Add deliberate buffer/lag to stabilize frontend playback and prevent audio stutter
+                _logger.LogDebug("🔊 Azure TTS: Buffering 300ms before streaming to allow frontend to prepare");
+                await Task.Delay(300, cancellationToken);
+
                 for (int i = 0; i < totalChunks; i++)
                 {
                     if (cancellationToken.IsCancellationRequested)

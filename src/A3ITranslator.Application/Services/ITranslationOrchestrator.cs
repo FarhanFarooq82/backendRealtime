@@ -18,4 +18,5 @@ public interface ITranslationOrchestrator
 
     Task<(string systemPrompt, string userPrompt)> BuildAgent2PromptsAsync(EnhancedTranslationRequest request);
     Task<(string systemPrompt, string userPrompt)> BuildAgent3PromptsAsync(EnhancedTranslationRequest request);
+    Task<(string systemPrompt, string userPrompt)> BuildFastIntentPromptsAsync(string transcription);
 }

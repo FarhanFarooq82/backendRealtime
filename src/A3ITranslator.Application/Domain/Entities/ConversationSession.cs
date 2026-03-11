@@ -57,6 +57,10 @@ public class ConversationSession
         get { lock(_lock) return _conversationHistory.ToList(); }
     }
     
+    // Agent 2 Fallback State
+    public int ConsecutiveAgent2Failures { get; set; } = 0;
+    public string? PreferredAgent2Provider { get; set; }
+    
     public string FinalTranscript { get; set; } = string.Empty;
 
     public void AppendTranscript(string text)

@@ -40,7 +40,7 @@ public interface IGenAIService
     /// <summary>
     /// Generate response from system and user prompts
     /// </summary>
-    Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false);
+    Task<GenAIResponse> GenerateResponseAsync(string systemPrompt, string userPrompt, bool useGrounding = false, string? preferredProvider = null);
     
     /// <summary>
     /// Stream response tokens from system and user prompts

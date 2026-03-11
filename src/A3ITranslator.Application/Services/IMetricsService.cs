@@ -59,8 +59,19 @@ public class CycleMetrics
     public DateTime? ConversationItemSentTime { get; set; }
 }
 
+public class TransitionMetrics
+{
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string SessionId { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string TurnId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string Details { get; set; } = string.Empty;
+}
+
 public interface IMetricsService
 {
     Task LogMetricsAsync(UsageMetrics metrics);
     Task LogCycleMetricsAsync(CycleMetrics metrics);
+    Task LogTransitionAsync(TransitionMetrics metrics);
 }

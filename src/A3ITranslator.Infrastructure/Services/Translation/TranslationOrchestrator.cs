@@ -55,6 +55,11 @@ public class TranslationOrchestrator : ITranslationOrchestrator
         return _promptService.BuildAgent2PromptsAsync(request);
     }
 
+    public Task<(string systemPrompt, string userPrompt)> BuildFastIntentPromptsAsync(string transcription)
+    {
+        return _promptService.BuildFastIntentPromptsAsync(transcription);
+    }
+
     public Task<(string systemPrompt, string userPrompt)> BuildAgent3PromptsAsync(EnhancedTranslationRequest request)
     {
         return _promptService.BuildAgent3PromptsAsync(request);
